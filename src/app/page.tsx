@@ -74,7 +74,7 @@ const PERIODES = [
   { label: "Cette année", value: "365d" },
 ];
 
-function GmailSection() {
+function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void }) {
   const { data: session, status } = useSession();
   const [factures, setFactures] = useState<Facture[]>([]);
   const [loading, setLoading] = useState(false);
@@ -84,6 +84,38 @@ function GmailSection() {
   const [dateFin, setDateFin] = useState("");
   const [pattern, setPattern] = useState("");
   const [modeDate, setModeDate] = useState<"preset" | "custom">("preset");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pdfLoading, setPdfLoading] = useState<string | null>(null);
+  const [pdfResults, setPdfResults] = useState<Record<string, { montant: number | null; tous: number[] }>>({});
+
+  const toggleSelect = async (facture: Facture) => {
+    const newSelected = new Set(selectedIds);
+    if (newSelected.has(facture.id!)) {
+      newSelected.delete(facture.id!);
+    } else {
+      newSelected.add(facture.id!);
+      // Lire le PDF si pas encore fait
+      if (!pdfResults[facture.id!] && (facture.attachments?.length ?? 0) > 0) {
+        setPdfLoading(facture.id!);
+        try {
+          const att = facture.attachments[0];
+          const res = await fetch(`/api/gmail/attachment?messageId=${att.messageId}&attachmentId=${att.attachmentId}`);
+          const data = await res.json();
+          setPdfResults((prev) => ({ ...prev, [facture.id!]: data }));
+          if (data.montant) onInjectCA(data.montant);
+        } catch {
+          // silence
+        } finally {
+          setPdfLoading(null);
+        }
+      } else if (pdfResults[facture.id!]?.montant) {
+        onInjectCA(pdfResults[facture.id!].montant!);
+      } else if (facture.montant) {
+        onInjectCA(facture.montant);
+      }
+    }
+    setSelectedIds(newSelected);
+  };
 
   const fetchFactures = useCallback(async () => {
     setLoading(true);
@@ -259,33 +291,79 @@ function GmailSection() {
               <span className="font-bold text-emerald-400">{formatEur(totalFactures)} total</span>
             )}
           </div>
-          <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1">
-            {factures.map((f) => (
-              <div key={f.id} className={`flex items-start justify-between gap-3 rounded-xl px-3 py-2.5 border ${f.isShine ? "bg-indigo-500/5 border-indigo-500/20" : "bg-white/[0.02] border-white/5"}`}>
-                <div className="flex flex-col gap-0.5 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {f.isShine && (
-                      <span className="text-xs bg-indigo-500/20 text-indigo-300 rounded-full px-2 py-0.5 font-medium shrink-0">Shine</span>
-                    )}
-                    <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
+          <div className="flex flex-col gap-2 max-h-96 overflow-y-auto pr-1">
+            {factures.map((f) => {
+              const isSelected = selectedIds.has(f.id!);
+              const isLoadingPdf = pdfLoading === f.id;
+              const pdfResult = pdfResults[f.id!];
+              const montantAffiche = pdfResult?.montant ?? f.montant;
+
+              return (
+                <div
+                  key={f.id}
+                  onClick={() => toggleSelect(f)}
+                  className={`flex items-start gap-3 rounded-xl px-3 py-2.5 border cursor-pointer transition-all ${
+                    isSelected
+                      ? "bg-emerald-500/10 border-emerald-500/30"
+                      : f.isShine
+                      ? "bg-indigo-500/5 border-indigo-500/20 hover:bg-indigo-500/10"
+                      : "bg-white/[0.02] border-white/5 hover:bg-white/5"
+                  }`}
+                >
+                  {/* Checkbox */}
+                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 transition-all ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-white/20"}`}>
+                    {isLoadingPdf ? (
+                      <span className="text-xs animate-spin">⏳</span>
+                    ) : isSelected ? (
+                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : null}
                   </div>
-                  <div className="text-xs text-white/40 truncate">{f.expediteur}</div>
-                  <div className="text-xs text-white/20">{new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
-                  {f.attachments.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {f.attachments.map((a) => (
-                        <span key={a.attachmentId} className="text-xs bg-white/5 border border-white/10 rounded px-2 py-0.5 text-white/40 flex items-center gap-1">
-                          📎 {a.nom}
-                        </span>
-                      ))}
+
+                  {/* Contenu */}
+                  <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      {f.isShine && (
+                        <span className="text-xs bg-indigo-500/20 text-indigo-300 rounded-full px-2 py-0.5 font-medium shrink-0">Shine</span>
+                      )}
+                      <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
+                    </div>
+                    <div className="text-xs text-white/40 truncate">{f.expediteur}</div>
+                    <div className="text-xs text-white/20">{new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
+                    {(f.attachments?.length ?? 0) > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {f.attachments.map((a) => (
+                          <span key={a.attachmentId} className="text-xs bg-white/5 border border-white/10 rounded px-2 py-0.5 text-white/40 flex items-center gap-1">
+                            📎 {a.nom}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {pdfResult && pdfResult.tous.length > 1 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {pdfResult.tous.map((m) => (
+                          <button
+                            key={m}
+                            onClick={(e) => { e.stopPropagation(); onInjectCA(m); }}
+                            className={`text-xs rounded px-2 py-0.5 border transition-all ${m === pdfResult.montant ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-300" : "bg-white/5 border-white/10 text-white/40 hover:bg-white/10"}`}
+                          >
+                            {formatEur(m)}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Montant */}
+                  {montantAffiche !== null && (
+                    <div className={`text-sm font-bold shrink-0 ${isSelected ? "text-emerald-400" : "text-white/50"}`}>
+                      {formatEur(montantAffiche)}
                     </div>
                   )}
                 </div>
-                {f.montant !== null && (
-                  <div className="text-sm font-bold text-emerald-400 shrink-0">{formatEur(f.montant)}</div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
@@ -308,6 +386,19 @@ function GmailSection() {
 export default function Home() {
   const [ca, setCa] = useState<number>(5000);
   const [input, setInput] = useState("5000");
+  const [caFromFactures, setCaFromFactures] = useState<number | null>(null);
+
+  const caEffectif = caFromFactures !== null ? caFromFactures : ca;
+
+  const handleInjectCA = (montant: number) => {
+    setCaFromFactures(montant);
+    setInput(String(montant));
+    setCa(montant);
+  };
+
+  const handleResetCA = () => {
+    setCaFromFactures(null);
+  };
 
   const calc = useMemo(() => {
     const tva = ca * (TVA_RATE / (1 + TVA_RATE));
@@ -370,6 +461,16 @@ export default function Home() {
             <span>0 €</span>
             <span>50 000 €</span>
           </div>
+          {caFromFactures !== null && (
+            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mt-1">
+              <span className="text-xs text-emerald-300 flex items-center gap-2">
+                📎 CA injecté depuis une facture PDF
+              </span>
+              <button onClick={handleResetCA} className="text-xs text-white/30 hover:text-white/60 transition-all">
+                ✕ Réinitialiser
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Barre de répartition */}
@@ -447,7 +548,7 @@ export default function Home() {
       </div>
 
       {/* Gmail */}
-      <GmailSection />
+      <GmailSection onInjectCA={handleInjectCA} />
 
       <div className="text-center text-xs text-white/20 pb-4">
         Calculs basés sur les taux 2025 • Non contractuel
