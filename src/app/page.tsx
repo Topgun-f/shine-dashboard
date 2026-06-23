@@ -384,8 +384,8 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
 }
 
 export default function Home() {
-  const [ca, setCa] = useState<number>(5000);
-  const [input, setInput] = useState("5000");
+  const [ca, setCa] = useState<number>(154000);
+  const [input, setInput] = useState("154000");
   const [caFromFactures, setCaFromFactures] = useState<number | null>(null);
 
   const caEffectif = caFromFactures !== null ? caFromFactures : ca;
@@ -448,7 +448,7 @@ export default function Home() {
           <input
             type="range"
             min={0}
-            max={50000}
+            max={200000}
             step={100}
             value={ca}
             onChange={(e) => {
@@ -459,7 +459,7 @@ export default function Home() {
           />
           <div className="flex justify-between text-xs text-white/20 mt-1">
             <span>0 €</span>
-            <span>50 000 €</span>
+            <span>200 000 €</span>
           </div>
           {caFromFactures !== null && (
             <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mt-1">
