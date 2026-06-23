@@ -63,19 +63,42 @@ interface Facture {
   date: string;
   montant: number | null;
   snippet: string;
+  isShine: boolean;
+  attachments: { nom: string; attachmentId: string; messageId: string }[];
 }
+
+const PERIODES = [
+  { label: "7 derniers jours", value: "7d" },
+  { label: "30 derniers jours", value: "30d" },
+  { label: "90 derniers jours", value: "90d" },
+  { label: "Cette année", value: "365d" },
+];
 
 function GmailSection() {
   const { data: session, status } = useSession();
   const [factures, setFactures] = useState<Facture[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [periode, setPeriode] = useState("365d");
+  const [dateDebut, setDateDebut] = useState("");
+  const [dateFin, setDateFin] = useState("");
+  const [pattern, setPattern] = useState("");
+  const [modeDate, setModeDate] = useState<"preset" | "custom">("preset");
 
   const fetchFactures = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/gmail");
+      const params = new URLSearchParams();
+      if (modeDate === "custom" && dateDebut && dateFin) {
+        params.set("dateDebut", dateDebut);
+        params.set("dateFin", dateFin);
+      } else {
+        params.set("periode", periode);
+      }
+      if (pattern.trim()) params.set("pattern", pattern.trim());
+
+      const res = await fetch(`/api/gmail?${params.toString()}`);
       if (!res.ok) throw new Error("Erreur lors de la récupération");
       const data = await res.json();
       setFactures(data.factures || []);
@@ -84,7 +107,7 @@ function GmailSection() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [periode, dateDebut, dateFin, pattern, modeDate]);
 
   useEffect(() => {
     if (session) fetchFactures();
@@ -131,6 +154,7 @@ function GmailSection() {
 
   return (
     <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center text-base">📧</div>
@@ -156,6 +180,73 @@ function GmailSection() {
         </div>
       </div>
 
+      {/* Filtres */}
+      <div className="flex flex-col gap-3 border border-white/5 rounded-xl p-3 bg-white/[0.02]">
+        {/* Toggle preset / custom */}
+        <div className="flex gap-2">
+          <button
+            onClick={() => setModeDate("preset")}
+            className={`text-xs rounded-lg px-3 py-1.5 transition-all ${modeDate === "preset" ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
+          >
+            Période prédéfinie
+          </button>
+          <button
+            onClick={() => setModeDate("custom")}
+            className={`text-xs rounded-lg px-3 py-1.5 transition-all ${modeDate === "custom" ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
+          >
+            Dates personnalisées
+          </button>
+        </div>
+
+        {/* Périodes prédéfinies */}
+        {modeDate === "preset" && (
+          <div className="flex flex-wrap gap-2">
+            {PERIODES.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPeriode(p.value)}
+                className={`text-xs rounded-lg px-3 py-1.5 transition-all ${periode === p.value ? "bg-white/15 text-white border border-white/20" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Dates custom */}
+        {modeDate === "custom" && (
+          <div className="flex gap-2 items-center flex-wrap">
+            <input
+              type="date"
+              value={dateDebut}
+              onChange={(e) => setDateDebut(e.target.value)}
+              className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white outline-none focus:border-indigo-500/60 transition-all"
+            />
+            <span className="text-white/30 text-xs">→</span>
+            <input
+              type="date"
+              value={dateFin}
+              onChange={(e) => setDateFin(e.target.value)}
+              className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white outline-none focus:border-indigo-500/60 transition-all"
+            />
+          </div>
+        )}
+
+        {/* Pattern */}
+        <div className="flex gap-2 items-center">
+          <input
+            type="text"
+            value={pattern}
+            onChange={(e) => setPattern(e.target.value)}
+            placeholder="Filtrer par mot-clé (ex: shine, stripe, paypal…)"
+            className="flex-1 text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white placeholder-white/20 outline-none focus:border-indigo-500/60 transition-all"
+          />
+          {pattern && (
+            <button onClick={() => setPattern("")} className="text-white/30 hover:text-white/60 text-xs transition-all">✕</button>
+          )}
+        </div>
+      </div>
+
       {error && (
         <div className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</div>
       )}
@@ -163,18 +254,32 @@ function GmailSection() {
       {!loading && factures.length > 0 && (
         <>
           <div className="flex items-center justify-between text-sm border-b border-white/5 pb-3">
-            <span className="text-white/50">{factures.length} factures trouvées (90 derniers jours)</span>
+            <span className="text-white/50">{factures.length} facture{factures.length > 1 ? "s" : ""} trouvée{factures.length > 1 ? "s" : ""}</span>
             {totalFactures > 0 && (
               <span className="font-bold text-emerald-400">{formatEur(totalFactures)} total</span>
             )}
           </div>
           <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1">
             {factures.map((f) => (
-              <div key={f.id} className="flex items-start justify-between gap-3 bg-white/[0.02] rounded-xl px-3 py-2.5 border border-white/5">
+              <div key={f.id} className={`flex items-start justify-between gap-3 rounded-xl px-3 py-2.5 border ${f.isShine ? "bg-indigo-500/5 border-indigo-500/20" : "bg-white/[0.02] border-white/5"}`}>
                 <div className="flex flex-col gap-0.5 min-w-0">
-                  <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
+                  <div className="flex items-center gap-2">
+                    {f.isShine && (
+                      <span className="text-xs bg-indigo-500/20 text-indigo-300 rounded-full px-2 py-0.5 font-medium shrink-0">Shine</span>
+                    )}
+                    <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
+                  </div>
                   <div className="text-xs text-white/40 truncate">{f.expediteur}</div>
-                  <div className="text-xs text-white/20">{f.date}</div>
+                  <div className="text-xs text-white/20">{new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
+                  {f.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {f.attachments.map((a) => (
+                        <span key={a.attachmentId} className="text-xs bg-white/5 border border-white/10 rounded px-2 py-0.5 text-white/40 flex items-center gap-1">
+                          📎 {a.nom}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {f.montant !== null && (
                   <div className="text-sm font-bold text-emerald-400 shrink-0">{formatEur(f.montant)}</div>
