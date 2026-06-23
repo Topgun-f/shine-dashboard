@@ -5,6 +5,7 @@ import { useSession, signIn, signOut } from "next-auth/react";
 
 const TVA_RATE = 0.20;
 const URSSAF_RATE = 0.261;
+const CFP_RATE = 0.002;
 
 const IR_TRANCHES = [
   { max: 11497, rate: 0 },
@@ -409,7 +410,8 @@ export default function Home() {
     const tva = ca * (TVA_RATE / (1 + TVA_RATE));
     const caHT = ca / (1 + TVA_RATE);
     const urssaf = caHT * URSSAF_RATE;
-    const revenuImposable = caHT - urssaf;
+    const cfp = caHT * CFP_RATE;
+    const revenuImposable = caHT - urssaf - cfp;
     // En mode facture unique : taux effectif annuel fixe (24.1%)
     // En mode annuel : calcul par tranches réel
     const ir = modeFacture
@@ -417,7 +419,7 @@ export default function Home() {
       : computeIR(revenuImposable);
     const net = revenuImposable - ir;
     const tauxIREffectif = revenuImposable > 0 ? ir / revenuImposable : 0;
-    return { tva, caHT, urssaf, revenuImposable, ir, net, tauxIREffectif };
+    return { tva, caHT, urssaf, cfp, revenuImposable, ir, net, tauxIREffectif };
   }, [ca, modeFacture]);
 
   const handleInput = (val: string) => {
@@ -504,6 +506,7 @@ export default function Home() {
       <div className="grid grid-cols-2 gap-3">
         <StatCard label="TVA à rendre" value={formatEur(calc.tva)} sub="à la DGFiP • taux 20%" color="bg-red-500" icon="🏛️" />
         <StatCard label="URSSAF" value={formatEur(calc.urssaf)} sub="BNC • taux 26.1%" color="bg-orange-500" icon="🏥" />
+        <StatCard label="Formation pro (CFP)" value={formatEur(calc.cfp)} sub="taux 0.2% du CA HT" color="bg-purple-500" icon="🎓" />
         <StatCard label="Impôt sur le revenu" value={formatEur(calc.ir)} sub={`Taux effectif ${formatPct(calc.tauxIREffectif)}`} color="bg-yellow-500" icon="📊" />
         <StatCard label="Net disponible" value={formatEur(calc.net)} sub={`${netPct.toFixed(0)}% de ton CA TTC`} color="bg-emerald-500" icon="💸" />
       </div>
@@ -542,6 +545,7 @@ export default function Home() {
             { label: "CA hors taxes (HT)", val: formatEur(calc.caHT), color: "text-white/70" },
             { label: "— TVA DGFiP (20%)", val: `- ${formatEur(calc.tva)}`, color: "text-red-400" },
             { label: "— URSSAF BNC (26.1% HT)", val: `- ${formatEur(calc.urssaf)}`, color: "text-orange-400" },
+            { label: "— Formation pro CFP (0.2% HT)", val: `- ${formatEur(calc.cfp)}`, color: "text-purple-400" },
             { label: "— Impôt sur le revenu", val: `- ${formatEur(calc.ir)}`, color: "text-yellow-400" },
           ].map(({ label, val, color }) => (
             <div key={label} className="flex justify-between items-center">
