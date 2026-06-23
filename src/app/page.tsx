@@ -383,21 +383,26 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
   );
 }
 
+const TAUX_IR_FIXE = 0.241; // taux effectif réel à 154k CA/an
+
 export default function Home() {
   const [ca, setCa] = useState<number>(154000);
   const [input, setInput] = useState("154000");
   const [caFromFactures, setCaFromFactures] = useState<number | null>(null);
-
-  const caEffectif = caFromFactures !== null ? caFromFactures : ca;
+  const [modeFacture, setModeFacture] = useState(false);
 
   const handleInjectCA = (montant: number) => {
     setCaFromFactures(montant);
     setInput(String(montant));
     setCa(montant);
+    setModeFacture(true);
   };
 
   const handleResetCA = () => {
     setCaFromFactures(null);
+    setModeFacture(false);
+    setCa(154000);
+    setInput("154000");
   };
 
   const calc = useMemo(() => {
@@ -405,11 +410,15 @@ export default function Home() {
     const caHT = ca / (1 + TVA_RATE);
     const urssaf = caHT * URSSAF_RATE;
     const revenuImposable = caHT - urssaf;
-    const ir = computeIR(revenuImposable);
+    // En mode facture unique : taux effectif annuel fixe (24.1%)
+    // En mode annuel : calcul par tranches réel
+    const ir = modeFacture
+      ? revenuImposable * TAUX_IR_FIXE
+      : computeIR(revenuImposable);
     const net = revenuImposable - ir;
     const tauxIREffectif = revenuImposable > 0 ? ir / revenuImposable : 0;
     return { tva, caHT, urssaf, revenuImposable, ir, net, tauxIREffectif };
-  }, [ca]);
+  }, [ca, modeFacture]);
 
   const handleInput = (val: string) => {
     setInput(val);
@@ -461,10 +470,10 @@ export default function Home() {
             <span>0 €</span>
             <span>200 000 €</span>
           </div>
-          {caFromFactures !== null && (
+          {modeFacture && (
             <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mt-1">
               <span className="text-xs text-emerald-300 flex items-center gap-2">
-                📎 CA injecté depuis une facture PDF
+                📎 Mode facture — IR à taux effectif fixe 24.1%
               </span>
               <button onClick={handleResetCA} className="text-xs text-white/30 hover:text-white/60 transition-all">
                 ✕ Réinitialiser
