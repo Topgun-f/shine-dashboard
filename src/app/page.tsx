@@ -491,18 +491,32 @@ function GmailSection({
           </div>
 
           {/* Bandeau sélection multiple */}
-          {selectedIds.size > 0 && (
-            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
-              <span className="text-xs text-emerald-300">
-                {selectedIds.size} facture{selectedIds.size > 1 ? "s" : ""} sélectionnée{selectedIds.size > 1 ? "s" : ""} —
-                estimation sur <span className="font-bold">{formatEur(shineFactures.filter((f) => selectedIds.has(f.id!)).reduce((s, f) => s + (getMontantFacture(f) ?? 0), 0))}</span>
-              </span>
+          <div className="flex items-center justify-between gap-2">
+            <button
+              onClick={() => {
+                const allIds = new Set(shineFactures.map((f) => f.id!));
+                setSelectedIds(allIds);
+                recalcCA(allIds, pdfResults);
+              }}
+              className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 hover:bg-white/10 transition-all"
+            >
+              Tout sélectionner
+            </button>
+            {selectedIds.size > 0 && (
               <button
                 onClick={() => { setSelectedIds(new Set()); onInjectCA(0); }}
                 className="text-xs text-white/30 hover:text-white/60 transition-all"
               >
                 ✕ Tout désélectionner
               </button>
+            )}
+          </div>
+          {selectedIds.size > 0 && (
+            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
+              <span className="text-xs text-emerald-300">
+                {selectedIds.size} facture{selectedIds.size > 1 ? "s" : ""} sélectionnée{selectedIds.size > 1 ? "s" : ""} —
+                estimation sur <span className="font-bold">{formatEur(shineFactures.filter((f) => selectedIds.has(f.id!)).reduce((s, f) => s + (getMontantFacture(f) ?? 0), 0))}</span>
+              </span>
             </div>
           )}
 
