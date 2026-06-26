@@ -123,9 +123,25 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
   }, [factures, pdfResults, annee]);
 
   const moisActuel = new Date().getMonth();
-  const maxCA = Math.max(...moisData.map((p) => p.ca), 1);
-  const maxCumul = Math.max(...moisData.map((p) => p.cumul), 1);
-  const totalEncaisse = moisData[11].cumul;
+
+  // Mois d'encaissement de la dernière facture (pour stopper la courbe)
+  const dernierMoisCourbe = useMemo(() => {
+    let max = -1;
+    for (const f of factures) {
+      const info = extractMoisFacture(f.sujet);
+      if (!info) continue;
+      const { mois, annee: anneeEnc } = moisEncaissement(info.moisIdx, info.annee);
+      if (anneeEnc === annee && mois > max) max = mois;
+    }
+    return max;
+  }, [factures, annee]);
+
+  // Histogramme : seulement les mois avec CA encaissé
+  const histoPoints = moisData.filter((p) => p.ca > 0);
+
+  const maxCA = Math.max(...histoPoints.map((p) => p.ca), 1);
+  const maxCumul = Math.max(...moisData.slice(0, dernierMoisCourbe + 1).map((p) => p.cumul), 1);
+  const totalEncaisse = dernierMoisCourbe >= 0 ? moisData[dernierMoisCourbe].cumul : 0;
 
   const W = 560;
   const H = 160;
@@ -133,90 +149,95 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
-  const xScale = (i: number) => PAD.left + (i / 11) * innerW;
-  const barW = innerW / 13;
+  // Histogramme : x basé sur les mois filtrés uniquement
+  const nHisto = histoPoints.length;
+  const xScaleHisto = (i: number) => PAD.left + (nHisto > 1 ? (i / (nHisto - 1)) : 0.5) * innerW;
+  const barW = nHisto > 1 ? innerW / (nHisto * 2) : innerW / 4;
 
+  // Courbe cumulative : 12 mois fixes, s'arrête au mois d'encaissement de la dernière facture
+  const xScaleCurve = (i: number) => PAD.left + (i / 11) * innerW;
   const yScaleHisto = (v: number) => PAD.top + innerH - (v / maxCA) * innerH;
   const yScaleCurve = (v: number) => PAD.top + innerH - (v / maxCumul) * innerH;
 
-  // Courbe cumulative : on trace jusqu'au dernier mois avec données
-  const dernierMoisData = moisData.reduce((last, p) => p.cumul > 0 ? p.i : last, -1);
-  const pathCumul = moisData
-    .slice(0, Math.max(dernierMoisData + 1, 1))
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScaleCurve(p.cumul)}`)
+  const cumulPoints = dernierMoisCourbe >= 0 ? moisData.slice(0, dernierMoisCourbe + 1) : [];
+  const pathCumul = cumulPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScaleCurve(p.i)} ${yScaleCurve(p.cumul)}`)
     .join(" ");
-  const areaCumul = dernierMoisData >= 0
-    ? pathCumul + ` L ${xScale(dernierMoisData)} ${yScaleCurve(0)} L ${xScale(0)} ${yScaleCurve(0)} Z`
+  const areaCumul = cumulPoints.length > 0
+    ? pathCumul + ` L ${xScaleCurve(dernierMoisCourbe)} ${yScaleCurve(0)} L ${xScaleCurve(0)} ${yScaleCurve(0)} Z`
     : "";
 
-  const Axe = ({ yScale: ys, max }: { yScale: (v: number) => number; max: number }) => (
+  const AxeH = () => (
     <>
-      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-        const y = ys(max * t);
+      {[0, 0.5, 1].map((t) => {
+        const y = yScaleHisto(maxCA * t);
         return (
           <g key={t}>
             <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-            <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">
-              {formatEur(max * t)}
-            </text>
+            <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">{formatEur(maxCA * t)}</text>
           </g>
         );
       })}
     </>
   );
 
-  const LabelsX = ({ hover, setHover }: { hover: number | null; setHover: (i: number | null) => void }) => (
+  const AxeC = () => (
     <>
-      {moisData.map((p) => (
-        <text key={p.i} x={xScale(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
-          fill={p.i === moisActuel ? "rgba(255,255,255,0.7)" : p.ca > 0 ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.18)"}
-          fontWeight={p.i === moisActuel ? "bold" : "normal"}
-        >{p.nomCourt}</text>
-      ))}
-      {moisData.map((p) => (
-        <rect key={`hz-${p.i}`} x={xScale(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
-          fill="transparent" onMouseEnter={() => setHover(p.i)} />
-      ))}
+      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+        const y = yScaleCurve(maxCumul * t);
+        return (
+          <g key={t}>
+            <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+            <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">{formatEur(maxCumul * t)}</text>
+          </g>
+        );
+      })}
     </>
   );
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Histogramme CA mensuel encaissé */}
+      {/* Histogramme CA mensuel encaissé — seulement les mois avec CA */}
       <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA encaissé par mois {annee}</div>
           <span className="text-xs text-white/40">
-            {hoverHisto !== null
+            {hoverHisto !== null && moisData[hoverHisto].ca > 0
               ? <>{moisData[hoverHisto].nomLong} <span className="font-bold text-indigo-300">{formatEur(moisData[hoverHisto].ca)}</span></>
               : <span className="font-bold text-white">{formatEur(totalEncaisse)}</span>
             }
           </span>
         </div>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHoverHisto(null)}>
-          <Axe yScale={yScaleHisto} max={maxCA} />
-          {moisData.map((p) => {
+          <AxeH />
+          {histoPoints.map((p, i) => {
             const bh = Math.max(0, (p.ca / maxCA) * innerH);
             const isHov = hoverHisto === p.i;
             return (
-              <rect key={p.i}
-                x={xScale(p.i) - barW / 2} y={yScaleHisto(p.ca)}
-                width={barW} height={bh} rx={3}
-                fill={isHov ? "#818cf8" : p.ca > 0 ? "rgba(99,102,241,0.75)" : "rgba(255,255,255,0.04)"}
-              />
+              <g key={p.i}>
+                <rect
+                  x={xScaleHisto(i) - barW / 2} y={yScaleHisto(p.ca)}
+                  width={barW} height={bh} rx={3}
+                  fill={isHov ? "#818cf8" : "rgba(99,102,241,0.75)"}
+                />
+                <text x={xScaleHisto(i)} y={H - 6} textAnchor="middle" fontSize={9}
+                  fill={isHov ? "rgba(255,255,255,0.8)" : "rgba(255,255,255,0.45)"}
+                >{p.nomCourt}</text>
+                <rect x={xScaleHisto(i) - barW} y={PAD.top} width={barW * 2} height={innerH}
+                  fill="transparent" onMouseEnter={() => setHoverHisto(p.i)} />
+              </g>
             );
           })}
-          <LabelsX hover={hoverHisto} setHover={setHoverHisto} />
         </svg>
-        <div className="text-xs text-white/30">Basé sur règlement 45 jours fin de mois après date de facturation</div>
+        <div className="text-xs text-white/30">Règlement mois de facturation + 2 mois</div>
       </div>
 
-      {/* Courbe CA cumulatif */}
+      {/* Courbe CA cumulatif — 12 mois fixes, s'arrête au dernier mois d'encaissement */}
       <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA cumulé {annee}</div>
           <span className="text-xs text-white/40">
-            {hoverCurve !== null
+            {hoverCurve !== null && moisData[hoverCurve].cumul > 0
               ? <>{moisData[hoverCurve].nomLong} <span className="font-bold text-emerald-300">{formatEur(moisData[hoverCurve].cumul)}</span></>
               : <>Total encaissé <span className="font-bold text-white">{formatEur(totalEncaisse)}</span></>
             }
@@ -229,23 +250,35 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
               <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
             </linearGradient>
           </defs>
-          <Axe yScale={yScaleCurve} max={maxCumul} />
+          <AxeC />
           {areaCumul && <path d={areaCumul} fill="url(#cumulGrad2)" />}
           {pathCumul && <path d={pathCumul} fill="none" stroke="#10b981" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
-          {moisData.slice(0, dernierMoisData + 1).map((p) => (
+          {/* Points sur les mois avec CA */}
+          {cumulPoints.map((p) => (
             p.cumul > 0 && (
-              <circle key={p.i} cx={xScale(p.i)} cy={yScaleCurve(p.cumul)}
+              <circle key={p.i} cx={xScaleCurve(p.i)} cy={yScaleCurve(p.cumul)}
                 r={hoverCurve === p.i ? 6 : p.ca > 0 ? 4 : 2}
                 fill={hoverCurve === p.i ? "white" : "#10b981"}
                 stroke={hoverCurve === p.i ? "#10b981" : "none"} strokeWidth={2}
               />
             )
           ))}
+          {/* Ligne hover verticale */}
           {hoverCurve !== null && moisData[hoverCurve].cumul > 0 && (
-            <line x1={xScale(hoverCurve)} x2={xScale(hoverCurve)} y1={PAD.top} y2={PAD.top + innerH}
+            <line x1={xScaleCurve(hoverCurve)} x2={xScaleCurve(hoverCurve)} y1={PAD.top} y2={PAD.top + innerH}
               stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="4 3" />
           )}
-          <LabelsX hover={hoverCurve} setHover={setHoverCurve} />
+          {/* Labels mois axe X — 12 mois fixes */}
+          {moisData.map((p) => (
+            <text key={p.i} x={xScaleCurve(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
+              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)") : "rgba(255,255,255,0.10)"}
+            >{p.nomCourt}</text>
+          ))}
+          {/* Zones hover sur les mois jusqu'au dernier encaissement */}
+          {cumulPoints.map((p) => (
+            <rect key={`hc-${p.i}`} x={xScaleCurve(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
+              fill="transparent" onMouseEnter={() => setHoverCurve(p.i)} />
+          ))}
         </svg>
       </div>
     </div>
