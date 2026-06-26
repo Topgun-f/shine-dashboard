@@ -136,10 +136,7 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
     return max;
   }, [factures, annee]);
 
-  // Histogramme : seulement les mois avec CA encaissé
-  const histoPoints = moisData.filter((p) => p.ca > 0);
-
-  const maxCA = Math.max(...histoPoints.map((p) => p.ca), 1);
+  const maxCA = Math.max(...moisData.map((p) => p.ca), 1);
   const maxCumul = Math.max(...moisData.slice(0, dernierMoisCourbe + 1).map((p) => p.cumul), 1);
   const totalEncaisse = dernierMoisCourbe >= 0 ? moisData[dernierMoisCourbe].cumul : 0;
 
@@ -149,12 +146,9 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
-  // Histogramme : x basé sur les mois filtrés uniquement
-  const nHisto = histoPoints.length;
-  const xScaleHisto = (i: number) => PAD.left + (nHisto > 1 ? (i / (nHisto - 1)) : 0.5) * innerW;
-  const barW = nHisto > 1 ? innerW / (nHisto * 2) : innerW / 4;
+  // Les deux graphes utilisent les 12 mois fixes
+  const xScaleHisto = (i: number) => PAD.left + (i / 11) * innerW;
 
-  // Courbe cumulative : 12 mois fixes, s'arrête au mois d'encaissement de la dernière facture
   const xScaleCurve = (i: number) => PAD.left + (i / 11) * innerW;
   const yScaleHisto = (v: number) => PAD.top + innerH - (v / maxCA) * innerH;
   const yScaleCurve = (v: number) => PAD.top + innerH - (v / maxCumul) * innerH;
@@ -195,39 +189,60 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
     </>
   );
 
+  // Courbe CA mensuel — s'arrête au dernier mois d'encaissement
+  const mensuelPoints = dernierMoisCourbe >= 0 ? moisData.slice(0, dernierMoisCourbe + 1) : [];
+  const pathMensuel = mensuelPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScaleHisto(p.i)} ${yScaleHisto(p.ca)}`)
+    .join(" ");
+  const areaMensuel = mensuelPoints.length > 0
+    ? pathMensuel + ` L ${xScaleHisto(dernierMoisCourbe)} ${yScaleHisto(0)} L ${xScaleHisto(0)} ${yScaleHisto(0)} Z`
+    : "";
+
   return (
     <div className="flex flex-col gap-4">
-      {/* Histogramme CA mensuel encaissé — seulement les mois avec CA */}
+      {/* Courbe CA mensuel encaissé */}
       <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA encaissé par mois {annee}</div>
           <span className="text-xs text-white/40">
-            {hoverHisto !== null && moisData[hoverHisto].ca > 0
+            {hoverHisto !== null && hoverHisto <= dernierMoisCourbe
               ? <>{moisData[hoverHisto].nomLong} <span className="font-bold text-indigo-300">{formatEur(moisData[hoverHisto].ca)}</span></>
               : <span className="font-bold text-white">{formatEur(totalEncaisse)}</span>
             }
           </span>
         </div>
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHoverHisto(null)}>
+          <defs>
+            <linearGradient id="mensuelGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
           <AxeH />
-          {histoPoints.map((p, i) => {
-            const bh = Math.max(0, (p.ca / maxCA) * innerH);
-            const isHov = hoverHisto === p.i;
-            return (
-              <g key={p.i}>
-                <rect
-                  x={xScaleHisto(i) - barW / 2} y={yScaleHisto(p.ca)}
-                  width={barW} height={bh} rx={3}
-                  fill={isHov ? "#818cf8" : "rgba(99,102,241,0.75)"}
-                />
-                <text x={xScaleHisto(i)} y={H - 6} textAnchor="middle" fontSize={9}
-                  fill={isHov ? "rgba(255,255,255,0.8)" : "rgba(255,255,255,0.45)"}
-                >{p.nomCourt}</text>
-                <rect x={xScaleHisto(i) - barW} y={PAD.top} width={barW * 2} height={innerH}
-                  fill="transparent" onMouseEnter={() => setHoverHisto(p.i)} />
-              </g>
-            );
-          })}
+          {areaMensuel && <path d={areaMensuel} fill="url(#mensuelGrad)" />}
+          {pathMensuel && <path d={pathMensuel} fill="none" stroke="rgba(99,102,241,0.9)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+          {mensuelPoints.map((p) => (
+            p.ca > 0 && (
+              <circle key={p.i} cx={xScaleHisto(p.i)} cy={yScaleHisto(p.ca)}
+                r={hoverHisto === p.i ? 6 : 4}
+                fill={hoverHisto === p.i ? "white" : "rgba(99,102,241,0.9)"}
+                stroke={hoverHisto === p.i ? "#6366f1" : "none"} strokeWidth={2}
+              />
+            )
+          ))}
+          {hoverHisto !== null && hoverHisto <= dernierMoisCourbe && moisData[hoverHisto].ca > 0 && (
+            <line x1={xScaleHisto(hoverHisto)} x2={xScaleHisto(hoverHisto)} y1={PAD.top} y2={PAD.top + innerH}
+              stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="4 3" />
+          )}
+          {moisData.map((p) => (
+            <text key={p.i} x={xScaleHisto(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
+              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)") : "rgba(255,255,255,0.10)"}
+            >{p.nomCourt}</text>
+          ))}
+          {mensuelPoints.map((p) => (
+            <rect key={`hm-${p.i}`} x={xScaleHisto(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
+              fill="transparent" onMouseEnter={() => setHoverHisto(p.i)} />
+          ))}
         </svg>
         <div className="text-xs text-white/30">Règlement mois de facturation + 2 mois</div>
       </div>
