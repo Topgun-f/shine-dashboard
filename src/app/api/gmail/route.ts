@@ -156,9 +156,13 @@ export async function GET(req: Request) {
       return { ...f, dateEncaissement: encaissement };
     });
 
-  facturesFiltrees.sort((a, b) =>
-    new Date(b.date).getTime() - new Date(a.date).getTime()
-  );
+  // Trier par mois de facturation (extrait du sujet) décroissant
+  facturesFiltrees.sort((a, b) => {
+    const ma = a.sujet.match(factureShinePattern);
+    const mb = b.sujet.match(factureShinePattern);
+    const getKey = (m: RegExpMatchArray | null) => m ? parseInt(m[2]) * 12 + (MOIS_FR[m[1].toLowerCase()] ?? 0) : 0;
+    return getKey(mb) - getKey(ma);
+  });
 
   return NextResponse.json({ factures: facturesFiltrees });
 }

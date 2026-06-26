@@ -80,188 +80,174 @@ const PERIODES = [
 const MOIS_NOMS_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
 const MOIS_NOMS_COURT = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
 
-interface PointMois {
-  key: string;       // "2026-06"
-  nomCourt: string;  // "Juin"
-  nomLong: string;   // "Juin 2026"
-  ca: number;
+const MOIS_FR_IDX: Record<string, number> = {
+  janvier: 0, février: 1, fevrier: 1, mars: 2, avril: 3, mai: 4, juin: 5,
+  juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
+};
+
+// 45j fin de mois : retourne le mois d'encaissement (0-11) et l'année
+function moisEncaissement(moisFactureIdx: number, anneeFacture: number): { mois: number; annee: number } {
+  const d = new Date(anneeFacture, moisFactureIdx, 1);
+  d.setDate(d.getDate() + 45);
+  return { mois: d.getMonth(), annee: d.getFullYear() };
 }
 
-function CACurve({ factures }: { factures: Facture[] }) {
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+function extractMoisFacture(sujet: string): { moisIdx: number; annee: number } | null {
+  const m = sujet.match(/Facture\s+(\w+)\s+(\d{4})/i);
+  if (!m) return null;
+  const moisIdx = MOIS_FR_IDX[m[1].toLowerCase()];
+  if (moisIdx === undefined) return null;
+  return { moisIdx, annee: parseInt(m[2]) };
+}
+
+function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: Record<string, { montant: number | null }> }) {
+  const [hoverHisto, setHoverHisto] = useState<number | null>(null);
+  const [hoverCurve, setHoverCurve] = useState<number | null>(null);
   const annee = new Date().getFullYear();
 
-  // 12 mois fixes Jan→Déc, CA mensuel puis cumulatif
-  const points = useMemo(() => {
+  // CA encaissé par mois (selon date d'encaissement 45j fin de mois)
+  const moisData = useMemo(() => {
     const mensuel = Array(12).fill(0);
     for (const f of factures) {
-      if (!f.montant) continue;
-      const d = new Date(f.date);
-      if (isNaN(d.getTime()) || d.getFullYear() !== annee) continue;
-      mensuel[d.getMonth()] += f.montant;
+      const info = extractMoisFacture(f.sujet);
+      if (!info) continue;
+      const montant = pdfResults[f.id!]?.montant ?? f.montant;
+      if (!montant) continue;
+      const { mois, annee: anneeEnc } = moisEncaissement(info.moisIdx, info.annee);
+      if (anneeEnc === annee) mensuel[mois] += montant;
     }
     let cumul = 0;
     return mensuel.map((ca, i) => {
       cumul += ca;
-      return {
-        moisIdx: i,
-        nomCourt: MOIS_NOMS_COURT[i],
-        nomLong: `${MOIS_NOMS_LONG[i]} ${annee}`,
-        ca,
-        cumul,
-        hasData: ca > 0,
-      };
+      return { i, nomCourt: MOIS_NOMS_COURT[i], nomLong: `${MOIS_NOMS_LONG[i]} ${annee}`, ca, cumul };
     });
-  }, [factures, annee]);
+  }, [factures, pdfResults, annee]);
 
-  const maxCumul = Math.max(...points.map((p) => p.cumul), 1);
-  const totalCA = points[11].cumul;
   const moisActuel = new Date().getMonth();
+  const maxCA = Math.max(...moisData.map((p) => p.ca), 1);
+  const maxCumul = Math.max(...moisData.map((p) => p.cumul), 1);
+  const totalEncaisse = moisData[11].cumul;
 
   const W = 560;
-  const H = 200;
-  const PAD = { top: 16, right: 16, bottom: 36, left: 64 };
+  const H = 160;
+  const PAD = { top: 12, right: 16, bottom: 32, left: 64 };
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
   const xScale = (i: number) => PAD.left + (i / 11) * innerW;
-  const yScale = (v: number) => PAD.top + innerH - (v / maxCumul) * innerH;
+  const barW = innerW / 13;
 
-  // Courbe cumulative uniquement sur les mois avec données (jusqu'au mois actuel)
-  const pathCumul = points
-    .slice(0, moisActuel + 1)
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.cumul)}`)
+  const yScaleHisto = (v: number) => PAD.top + innerH - (v / maxCA) * innerH;
+  const yScaleCurve = (v: number) => PAD.top + innerH - (v / maxCumul) * innerH;
+
+  // Courbe cumulative : on trace jusqu'au dernier mois avec données
+  const dernierMoisData = moisData.reduce((last, p) => p.cumul > 0 ? p.i : last, -1);
+  const pathCumul = moisData
+    .slice(0, Math.max(dernierMoisData + 1, 1))
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScaleCurve(p.cumul)}`)
     .join(" ");
-
-  const areaCumul = points.slice(0, moisActuel + 1).length > 0
-    ? pathCumul + ` L ${xScale(moisActuel)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`
+  const areaCumul = dernierMoisData >= 0
+    ? pathCumul + ` L ${xScale(dernierMoisData)} ${yScaleCurve(0)} L ${xScale(0)} ${yScaleCurve(0)} Z`
     : "";
 
-  const hovered = hoverIdx !== null ? points[hoverIdx] : null;
+  const Axe = ({ yScale: ys, max }: { yScale: (v: number) => number; max: number }) => (
+    <>
+      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+        const y = ys(max * t);
+        return (
+          <g key={t}>
+            <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+            <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">
+              {formatEur(max * t)}
+            </text>
+          </g>
+        );
+      })}
+    </>
+  );
+
+  const LabelsX = ({ hover, setHover }: { hover: number | null; setHover: (i: number | null) => void }) => (
+    <>
+      {moisData.map((p) => (
+        <text key={p.i} x={xScale(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
+          fill={p.i === moisActuel ? "rgba(255,255,255,0.7)" : p.ca > 0 ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.18)"}
+          fontWeight={p.i === moisActuel ? "bold" : "normal"}
+        >{p.nomCourt}</text>
+      ))}
+      {moisData.map((p) => (
+        <rect key={`hz-${p.i}`} x={xScale(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
+          fill="transparent" onMouseEnter={() => setHover(p.i)} />
+      ))}
+    </>
+  );
 
   return (
-    <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA cumulé {annee}</div>
-        <div className="flex flex-col items-end gap-0.5">
-          {hovered ? (
-            <>
-              <span className="text-xs text-white/40">{hovered.nomLong} — mensuel <span className="font-bold text-indigo-300">{formatEur(hovered.ca)}</span></span>
-              <span className="text-xs text-white/40">Cumulé <span className="font-bold text-white">{formatEur(hovered.cumul)}</span></span>
-            </>
-          ) : (
-            <span className="text-xs text-white/40">Total encaissé <span className="font-bold text-white">{formatEur(totalCA)}</span></span>
-          )}
+    <div className="flex flex-col gap-4">
+      {/* Histogramme CA mensuel encaissé */}
+      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA encaissé par mois {annee}</div>
+          <span className="text-xs text-white/40">
+            {hoverHisto !== null
+              ? <>{moisData[hoverHisto].nomLong} <span className="font-bold text-indigo-300">{formatEur(moisData[hoverHisto].ca)}</span></>
+              : <span className="font-bold text-white">{formatEur(totalEncaisse)}</span>
+            }
+          </span>
         </div>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHoverHisto(null)}>
+          <Axe yScale={yScaleHisto} max={maxCA} />
+          {moisData.map((p) => {
+            const bh = Math.max(0, (p.ca / maxCA) * innerH);
+            const isHov = hoverHisto === p.i;
+            return (
+              <rect key={p.i}
+                x={xScale(p.i) - barW / 2} y={yScaleHisto(p.ca)}
+                width={barW} height={bh} rx={3}
+                fill={isHov ? "#818cf8" : p.ca > 0 ? "rgba(99,102,241,0.75)" : "rgba(255,255,255,0.04)"}
+              />
+            );
+          })}
+          <LabelsX hover={hoverHisto} setHover={setHoverHisto} />
+        </svg>
+        <div className="text-xs text-white/30">Basé sur règlement 45 jours fin de mois après date de facturation</div>
       </div>
 
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        style={{ height: H }}
-        onMouseLeave={() => setHoverIdx(null)}
-      >
-        <defs>
-          <linearGradient id="cumulGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
-
-        {/* Grille horizontale */}
-        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-          const y = yScale(maxCumul * t);
-          return (
-            <g key={t}>
-              <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-              <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">
-                {formatEur(maxCumul * t)}
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Séparateur mois actuel / futur */}
-        <line
-          x1={xScale(moisActuel)} x2={xScale(moisActuel)}
-          y1={PAD.top} y2={PAD.top + innerH}
-          stroke="rgba(255,255,255,0.08)" strokeWidth={1} strokeDasharray="3 3"
-        />
-
-        {/* Aire cumul */}
-        {areaCumul && <path d={areaCumul} fill="url(#cumulGrad)" />}
-
-        {/* Ligne cumulative */}
-        {pathCumul && (
-          <path d={pathCumul} fill="none" stroke="rgba(99,102,241,0.9)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-        )}
-
-        {/* Barres mensuelles (mini) pour les mois avec CA */}
-        {points.map((p, i) => {
-          if (!p.hasData) return null;
-          const bw = 6;
-          const bh = Math.max(2, (p.ca / maxCumul) * innerH * 0.3);
-          return (
-            <rect
-              key={`bar-${i}`}
-              x={xScale(i) - bw / 2}
-              y={PAD.top + innerH - bh}
-              width={bw}
-              height={bh}
-              rx={2}
-              fill={hoverIdx === i ? "#818cf8" : "rgba(99,102,241,0.35)"}
-            />
-          );
-        })}
-
-        {/* Labels mois axe X */}
-        {points.map((p, i) => (
-          <text
-            key={i}
-            x={xScale(i)} y={H - 8}
-            textAnchor="middle" fontSize={9}
-            fill={i === moisActuel ? "rgba(255,255,255,0.6)" : p.hasData ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.18)"}
-            fontWeight={i === moisActuel ? "bold" : "normal"}
-          >
-            {p.nomCourt}
-          </text>
-        ))}
-
-        {/* Points sur courbe cumulative */}
-        {points.slice(0, moisActuel + 1).map((p, i) => (
-          p.cumul > 0 && (
-            <circle
-              key={`pt-${i}`}
-              cx={xScale(i)} cy={yScale(p.cumul)}
-              r={hoverIdx === i ? 6 : p.hasData ? 4 : 2}
-              fill={hoverIdx === i ? "#818cf8" : p.hasData ? "rgba(99,102,241,0.9)" : "rgba(99,102,241,0.3)"}
-              stroke={hoverIdx === i ? "white" : "none"}
-              strokeWidth={1.5}
-            />
-          )
-        ))}
-
-        {/* Zones hover invisibles — toute la hauteur, tous les mois */}
-        {points.map((_, i) => (
-          <rect
-            key={`hover-${i}`}
-            x={xScale(i) - innerW / 22}
-            y={PAD.top}
-            width={innerW / 11}
-            height={innerH}
-            fill="transparent"
-            onMouseEnter={() => setHoverIdx(i)}
-          />
-        ))}
-      </svg>
-
-      <div className="flex gap-4 text-xs text-white/40">
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-0.5 bg-indigo-400 inline-block rounded" />CA cumulé (TTC)
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-2 h-2 rounded-sm bg-indigo-500/40 inline-block" />CA mensuel
-        </span>
+      {/* Courbe CA cumulatif */}
+      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA cumulé {annee}</div>
+          <span className="text-xs text-white/40">
+            {hoverCurve !== null
+              ? <>{moisData[hoverCurve].nomLong} <span className="font-bold text-emerald-300">{formatEur(moisData[hoverCurve].cumul)}</span></>
+              : <>Total encaissé <span className="font-bold text-white">{formatEur(totalEncaisse)}</span></>
+            }
+          </span>
+        </div>
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHoverCurve(null)}>
+          <defs>
+            <linearGradient id="cumulGrad2" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+            </linearGradient>
+          </defs>
+          <Axe yScale={yScaleCurve} max={maxCumul} />
+          {areaCumul && <path d={areaCumul} fill="url(#cumulGrad2)" />}
+          {pathCumul && <path d={pathCumul} fill="none" stroke="#10b981" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+          {moisData.slice(0, dernierMoisData + 1).map((p) => (
+            p.cumul > 0 && (
+              <circle key={p.i} cx={xScale(p.i)} cy={yScaleCurve(p.cumul)}
+                r={hoverCurve === p.i ? 6 : p.ca > 0 ? 4 : 2}
+                fill={hoverCurve === p.i ? "white" : "#10b981"}
+                stroke={hoverCurve === p.i ? "#10b981" : "none"} strokeWidth={2}
+              />
+            )
+          ))}
+          {hoverCurve !== null && moisData[hoverCurve].cumul > 0 && (
+            <line x1={xScale(hoverCurve)} x2={xScale(hoverCurve)} y1={PAD.top} y2={PAD.top + innerH}
+              stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="4 3" />
+          )}
+          <LabelsX hover={hoverCurve} setHover={setHoverCurve} />
+        </svg>
       </div>
     </div>
   );
@@ -270,9 +256,11 @@ function CACurve({ factures }: { factures: Facture[] }) {
 function GmailSection({
   onInjectCA,
   onFacturesLoaded,
+  onPdfResults,
 }: {
   onInjectCA: (montant: number) => void;
   onFacturesLoaded: (factures: Facture[]) => void;
+  onPdfResults: (results: Record<string, { montant: number | null }>) => void;
 }) {
   const { data: session, status } = useSession();
   const [factures, setFactures] = useState<Facture[]>([]);
@@ -317,6 +305,7 @@ function GmailSection({
           const data = await res.json();
           const newResults = { ...pdfResults, [facture.id!]: data };
           setPdfResults(newResults);
+          onPdfResults(newResults);
           setSelectedIds(newSelected);
           recalcCA(newSelected, newResults);
           return;
@@ -600,6 +589,7 @@ export default function Home() {
   const [input, setInput] = useState("154000");
   const [modeFacture, setModeFacture] = useState(false);
   const [shineFactures, setShineFactures] = useState<Facture[]>([]);
+  const [shinePdfResults, setShinePdfResults] = useState<Record<string, { montant: number | null }>>({});
 
   const handleInjectCA = (montant: number) => {
     setInput(String(montant));
@@ -705,7 +695,7 @@ export default function Home() {
       </div>
 
       {/* Courbe CA réel Shine */}
-      <CACurve factures={shineFactures} />
+      <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
 
       {/* Détail tranches IR */}
       <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
@@ -757,7 +747,7 @@ export default function Home() {
       </div>
 
       {/* Gmail — Factures Shine uniquement */}
-      <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} />
+      <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
 
       <div className="text-center text-xs text-white/20 pb-4">
         Calculs basés sur les taux 2025 • Non contractuel
