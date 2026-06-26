@@ -46,14 +46,14 @@ function StatCard({
   label: string; value: string; sub?: string; color: string; icon: string; valueColor?: string;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-2xl p-5 flex flex-col gap-2 border border-white/5 bg-white/[0.03]">
-      <div className={`absolute -top-6 -right-6 w-24 h-24 rounded-full opacity-20 blur-2xl ${color}`} />
-      <div className="flex items-center gap-2 text-white/50 text-sm font-medium">
-        <span className="text-lg">{icon}</span>
+    <div className="relative overflow-hidden rounded-xl p-4 flex flex-col gap-1.5 border border-white/5 bg-white/[0.03]">
+      <div className={`absolute -top-4 -right-4 w-16 h-16 rounded-full opacity-20 blur-2xl ${color}`} />
+      <div className="flex items-center gap-1.5 text-white/40 text-xs font-medium">
+        <span className="text-sm">{icon}</span>
         {label}
       </div>
-      <div className={`text-2xl font-bold tracking-tight ${valueColor ?? "text-white"}`}>{value}</div>
-      {sub && <div className="text-xs text-white/40">{sub}</div>}
+      <div className={`text-xl font-bold tracking-tight ${valueColor ?? "text-white"}`}>{value}</div>
+      {sub && <div className="text-[10px] text-white/30">{sub}</div>}
     </div>
   );
 }
@@ -155,8 +155,8 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
   const totalEncaisse = dernierMoisCourbe >= 0 ? moisData[dernierMoisCourbe].cumul : 0;
 
   const W = 560;
-  const H = 160;
-  const PAD = { top: 12, right: 16, bottom: 32, left: 64 };
+  const H = 200;
+  const PAD = { top: 16, right: 16, bottom: 32, left: 64 };
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
@@ -212,113 +212,129 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
     ? pathMensuel + ` L ${xScaleHisto(dernierMoisCourbe)} ${yScaleHisto(0)} L ${xScaleHisto(0)} ${yScaleHisto(0)} Z`
     : "";
 
+  const ChartSvg = ({ children, onLeave }: { children: React.ReactNode; onLeave: () => void }) => (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={onLeave}>
+      {children}
+    </svg>
+  );
+
   return (
-    <div className="flex flex-col gap-4">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
       {/* Courbe CA mensuel encaissé */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA encaissé par mois {annee}</div>
-          <span className="text-xs text-white/40">
+      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">CA encaissé / mois</div>
+            <div className="text-lg font-bold text-indigo-300 mt-0.5">
+              {hoverHisto !== null && hoverHisto <= dernierMoisCourbe
+                ? formatEur(moisData[hoverHisto].ca)
+                : formatEur(totalEncaisse)}
+            </div>
+          </div>
+          <div className="text-right text-xs text-white/30 shrink-0">
             {hoverHisto !== null && hoverHisto <= dernierMoisCourbe
               ? <>
-                  {moisData[hoverHisto].nomLong} <span className="font-bold text-indigo-300">{formatEur(moisData[hoverHisto].ca)}</span>
+                  <div className="text-white/60">{moisData[hoverHisto].nomLong}</div>
                   {factureParEncaissement[hoverHisto] && (
-                    <span className="ml-2 text-white/30">· Facture {factureParEncaissement[hoverHisto]}</span>
+                    <div className="text-white/25">Facture {factureParEncaissement[hoverHisto]}</div>
                   )}
                 </>
-              : <span className="font-bold text-white">{formatEur(totalEncaisse)}</span>
+              : <div className="text-white/25">{annee} · total encaissé</div>
             }
-          </span>
+          </div>
         </div>
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHoverHisto(null)}>
+        <ChartSvg onLeave={() => setHoverHisto(null)}>
           <defs>
             <linearGradient id="mensuelGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
+              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.01" />
             </linearGradient>
           </defs>
           <AxeH />
           {areaMensuel && <path d={areaMensuel} fill="url(#mensuelGrad)" />}
-          {pathMensuel && <path d={pathMensuel} fill="none" stroke="rgba(99,102,241,0.9)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
+          {pathMensuel && <path d={pathMensuel} fill="none" stroke="#818cf8" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
           {mensuelPoints.map((p) => (
             p.ca > 0 && (
               <circle key={p.i} cx={xScaleHisto(p.i)} cy={yScaleHisto(p.ca)}
                 r={hoverHisto === p.i ? 6 : 4}
-                fill={hoverHisto === p.i ? "white" : "rgba(99,102,241,0.9)"}
-                stroke={hoverHisto === p.i ? "#6366f1" : "none"} strokeWidth={2}
+                fill={hoverHisto === p.i ? "white" : "#818cf8"}
+                stroke={hoverHisto === p.i ? "#6366f1" : "rgba(99,102,241,0.3)"} strokeWidth={2}
               />
             )
           ))}
           {hoverHisto !== null && hoverHisto <= dernierMoisCourbe && moisData[hoverHisto].ca > 0 && (
             <line x1={xScaleHisto(hoverHisto)} x2={xScaleHisto(hoverHisto)} y1={PAD.top} y2={PAD.top + innerH}
-              stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="4 3" />
+              stroke="rgba(255,255,255,0.12)" strokeWidth={1} strokeDasharray="3 3" />
           )}
           {moisData.map((p) => (
             <text key={p.i} x={xScaleHisto(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
-              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)") : "rgba(255,255,255,0.10)"}
+              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.2)") : "rgba(255,255,255,0.08)"}
             >{p.nomCourt}</text>
           ))}
           {mensuelPoints.map((p) => (
             <rect key={`hm-${p.i}`} x={xScaleHisto(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
               fill="transparent" onMouseEnter={() => setHoverHisto(p.i)} />
           ))}
-        </svg>
-        <div className="text-xs text-white/30">Règlement mois de facturation + 2 mois</div>
+        </ChartSvg>
+        <div className="text-[10px] text-white/20">Règlement facture + 2 mois</div>
       </div>
 
-      {/* Courbe CA cumulatif — 12 mois fixes, s'arrête au dernier mois d'encaissement */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA cumulé {annee}</div>
-          <span className="text-xs text-white/40">
+      {/* Courbe CA cumulatif */}
+      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-2">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">CA cumulé {annee}</div>
+            <div className="text-lg font-bold text-emerald-400 mt-0.5">
+              {hoverCurve !== null && moisData[hoverCurve].cumul > 0
+                ? formatEur(moisData[hoverCurve].cumul)
+                : formatEur(totalEncaisse)}
+            </div>
+          </div>
+          <div className="text-right text-xs text-white/30 shrink-0">
             {hoverCurve !== null && moisData[hoverCurve].cumul > 0
               ? <>
-                  {moisData[hoverCurve].nomLong} <span className="font-bold text-emerald-300">{formatEur(moisData[hoverCurve].cumul)}</span>
+                  <div className="text-white/60">{moisData[hoverCurve].nomLong}</div>
                   {factureParEncaissement[hoverCurve] && (
-                    <span className="ml-2 text-white/30">· Facture {factureParEncaissement[hoverCurve]}</span>
+                    <div className="text-white/25">Facture {factureParEncaissement[hoverCurve]}</div>
                   )}
                 </>
-              : <>Total encaissé <span className="font-bold text-white">{formatEur(totalEncaisse)}</span></>
+              : <div className="text-white/25">total encaissé à ce jour</div>
             }
-          </span>
+          </div>
         </div>
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHoverCurve(null)}>
+        <ChartSvg onLeave={() => setHoverCurve(null)}>
           <defs>
             <linearGradient id="cumulGrad2" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+              <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#10b981" stopOpacity="0.01" />
             </linearGradient>
           </defs>
           <AxeC />
           {areaCumul && <path d={areaCumul} fill="url(#cumulGrad2)" />}
-          {pathCumul && <path d={pathCumul} fill="none" stroke="#10b981" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />}
-          {/* Points sur les mois avec CA */}
+          {pathCumul && <path d={pathCumul} fill="none" stroke="#34d399" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
           {cumulPoints.map((p) => (
             p.cumul > 0 && (
               <circle key={p.i} cx={xScaleCurve(p.i)} cy={yScaleCurve(p.cumul)}
                 r={hoverCurve === p.i ? 6 : p.ca > 0 ? 4 : 2}
-                fill={hoverCurve === p.i ? "white" : "#10b981"}
-                stroke={hoverCurve === p.i ? "#10b981" : "none"} strokeWidth={2}
+                fill={hoverCurve === p.i ? "white" : "#34d399"}
+                stroke={hoverCurve === p.i ? "#10b981" : "rgba(16,185,129,0.3)"} strokeWidth={2}
               />
             )
           ))}
-          {/* Ligne hover verticale */}
           {hoverCurve !== null && moisData[hoverCurve].cumul > 0 && (
             <line x1={xScaleCurve(hoverCurve)} x2={xScaleCurve(hoverCurve)} y1={PAD.top} y2={PAD.top + innerH}
-              stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="4 3" />
+              stroke="rgba(255,255,255,0.12)" strokeWidth={1} strokeDasharray="3 3" />
           )}
-          {/* Labels mois axe X — 12 mois fixes */}
           {moisData.map((p) => (
             <text key={p.i} x={xScaleCurve(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
-              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.45)" : "rgba(255,255,255,0.22)") : "rgba(255,255,255,0.10)"}
+              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.2)") : "rgba(255,255,255,0.08)"}
             >{p.nomCourt}</text>
           ))}
-          {/* Zones hover sur les mois jusqu'au dernier encaissement */}
           {cumulPoints.map((p) => (
             <rect key={`hc-${p.i}`} x={xScaleCurve(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
               fill="transparent" onMouseEnter={() => setHoverCurve(p.i)} />
           ))}
-        </svg>
+        </ChartSvg>
       </div>
     </div>
   );
@@ -685,148 +701,142 @@ export default function Home() {
   const netPct = ca > 0 ? (calc.net / ca) * 100 : 0;
 
   return (
-    <main className="min-h-screen px-4 py-6 max-w-screen-xl mx-auto flex flex-col gap-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-xl bg-indigo-500/20 flex items-center justify-center text-xl">💎</div>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight leading-none">Shine Dashboard</h1>
-          <p className="text-white/40 text-xs mt-0.5">Micro-entreprise BNC • TVA 20%</p>
+    <main className="min-h-screen bg-[#080810] text-white">
+      {/* Top bar */}
+      <div className="border-b border-white/5 px-6 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-indigo-500/25 flex items-center justify-center text-base">💎</div>
+          <span className="font-bold text-sm tracking-tight">Shine Dashboard</span>
+          <span className="text-white/20 text-xs">BNC • TVA 20%</span>
         </div>
+        <div className="text-[10px] text-white/20">Taux 2025 • Non contractuel</div>
       </div>
 
-      {/* Layout 2 colonnes sur grand écran */}
-      <div className="flex flex-col lg:flex-row gap-6 items-start">
+      <div className="px-6 py-5 flex flex-col gap-5 max-w-screen-2xl mx-auto">
 
-        {/* Colonne gauche — Simulateur */}
-        <div className="w-full lg:w-[420px] lg:shrink-0 flex flex-col gap-5">
+        {/* Ligne 1 : KPIs + saisie CA */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
 
-          {/* Saisie CA */}
-          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
-            <label className="text-sm text-white/50 font-medium">Chiffre d&apos;affaires encaissé (TTC)</label>
-            <div className="relative">
-              <input
-                type="number"
-                value={input}
-                onChange={(e) => handleInput(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pr-10 text-2xl font-bold outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
-                min={0}
-                step={100}
-              />
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 text-xl font-bold">€</span>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={200000}
-              step={100}
-              value={ca}
-              onChange={(e) => {
-                setCa(Number(e.target.value));
-                setInput(String(e.target.value));
-              }}
-            />
-            <div className="flex justify-between text-xs text-white/20 -mt-2">
-              <span>0 €</span>
-              <span>200 000 €</span>
-            </div>
-            {modeFacture && (
-              <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
-                <span className="text-xs text-emerald-300 flex items-center gap-2">
-                  📎 Montant issu d&apos;une facture — IR taux fixe 24%
-                </span>
-                <button onClick={handleResetCA} className="text-xs text-white/30 hover:text-white/60 transition-all">
-                  ✕ Réinitialiser
-                </button>
+          {/* KPIs en ligne */}
+          <div className="flex flex-col gap-3">
+            {/* Net en hero */}
+            <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-transparent p-5 flex items-center justify-between">
+              <div>
+                <div className="text-[10px] font-semibold text-emerald-400/60 uppercase tracking-widest mb-1">Net disponible</div>
+                <div className="text-4xl font-black text-emerald-400 tracking-tight">{formatEur(calc.net)}</div>
+                <div className="text-xs text-white/30 mt-1">{netPct.toFixed(0)}% de ton CA TTC</div>
               </div>
-            )}
+              <div className="flex flex-col gap-1 text-right">
+                <div className="text-[10px] text-white/20 uppercase tracking-wider">CA encaissé</div>
+                <div className="text-xl font-bold text-white">{formatEur(ca)}</div>
+                <div className="text-xs text-white/30">HT : {formatEur(calc.caHT)}</div>
+              </div>
+            </div>
+
+            {/* 4 charges en grille */}
+            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+              <StatCard label="TVA DGFiP" value={`- ${formatEur(calc.tva)}`} sub="20% du CA TTC" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
+              <StatCard label="URSSAF BNC" value={`- ${formatEur(calc.urssaf)}`} sub="26.1% du CA HT" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
+              <StatCard label="Impôt revenu" value={`- ${formatEur(calc.ir)}`} sub={`Taux fixe 24%`} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
+              <StatCard label="Formation CFP" value={`- ${formatEur(calc.cfp)}`} sub="0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
+            </div>
 
             {/* Barre de répartition */}
-            <div className="flex flex-col gap-2">
-              <div className="text-xs text-white/40 font-medium uppercase tracking-wider">Répartition du CA</div>
-              <div className="flex h-3 rounded-full overflow-hidden gap-px">
-                <div className="bg-red-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.tva / ca) * 100}%` : "0%" }} />
-                <div className="bg-orange-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.urssaf / ca) * 100}%` : "0%" }} />
-                <div className="bg-yellow-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.ir / ca) * 100}%` : "0%" }} />
-                <div className="bg-emerald-500/80 transition-all duration-300 flex-1 min-w-0" />
+            <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 flex flex-col gap-2">
+              <div className="flex h-2 rounded-full overflow-hidden gap-px">
+                <div className="bg-red-500/80 transition-all duration-500" style={{ width: ca > 0 ? `${(calc.tva / ca) * 100}%` : "0%" }} title="TVA" />
+                <div className="bg-orange-500/80 transition-all duration-500" style={{ width: ca > 0 ? `${(calc.urssaf / ca) * 100}%` : "0%" }} title="URSSAF" />
+                <div className="bg-yellow-500/80 transition-all duration-500" style={{ width: ca > 0 ? `${(calc.ir / ca) * 100}%` : "0%" }} title="IR" />
+                <div className="bg-emerald-500/80 transition-all duration-500 flex-1 min-w-0" title="Net" />
               </div>
-              <div className="flex flex-wrap gap-3 text-xs text-white/40">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500/80 inline-block" />TVA</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500/80 inline-block" />URSSAF</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500/80 inline-block" />Impôt</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500/80 inline-block" />Net</span>
+              <div className="flex gap-4 text-[10px] text-white/30">
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500/80 inline-block" />TVA {ca > 0 ? `${((calc.tva / ca) * 100).toFixed(0)}%` : ""}</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange-500/80 inline-block" />URSSAF {ca > 0 ? `${((calc.urssaf / ca) * 100).toFixed(0)}%` : ""}</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-yellow-500/80 inline-block" />IR {ca > 0 ? `${((calc.ir / ca) * 100).toFixed(0)}%` : ""}</span>
+                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500/80 inline-block" />Net {ca > 0 ? `${((calc.net / ca) * 100).toFixed(0)}%` : ""}</span>
               </div>
             </div>
           </div>
 
-          {/* Cards */}
-          <div className="grid grid-cols-2 gap-3">
-            <StatCard label="TVA à rendre" value={`- ${formatEur(calc.tva)}`} sub="à la DGFiP • taux 20%" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
-            <StatCard label="URSSAF" value={`- ${formatEur(calc.urssaf)}`} sub="BNC • taux 26.1%" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
-            <StatCard label="Formation pro (CFP)" value={`- ${formatEur(calc.cfp)}`} sub="taux 0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
-            <StatCard label="Impôt sur le revenu" value={`- ${formatEur(calc.ir)}`} sub={`Taux effectif ${formatPct(calc.tauxIREffectif)}`} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
-            <StatCard label="Net disponible" value={formatEur(calc.net)} sub={`${netPct.toFixed(0)}% de ton CA TTC`} color="bg-emerald-500" icon="💸" valueColor="text-emerald-400" />
-          </div>
+          {/* Panneau saisie + récap + tranches */}
+          <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-3">
+            {/* Saisie CA */}
+            <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-3">
+              <label className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">CA estimé (TTC)</label>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={input}
+                  onChange={(e) => handleInput(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 pr-8 text-xl font-bold outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                  min={0} step={100}
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 font-bold">€</span>
+              </div>
+              <input type="range" min={0} max={200000} step={100} value={ca}
+                onChange={(e) => { setCa(Number(e.target.value)); setInput(String(e.target.value)); }}
+              />
+              <div className="flex justify-between text-[10px] text-white/20 -mt-1"><span>0 €</span><span>200 k€</span></div>
+              {modeFacture && (
+                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+                  <span className="text-[10px] text-emerald-300">📎 Montant issu d&apos;une facture</span>
+                  <button onClick={handleResetCA} className="text-[10px] text-white/30 hover:text-white/60">✕</button>
+                </div>
+              )}
+            </div>
 
-          {/* Récap final */}
-          <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 flex flex-col gap-3">
-            <div className="text-sm font-medium text-indigo-300 uppercase tracking-wider">Récapitulatif</div>
-            <div className="flex flex-col gap-2 text-sm">
+            {/* Récap compact */}
+            <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-1.5 text-xs">
+              <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-1">Récapitulatif</div>
               {[
-                { label: "CA encaissé (TTC)", val: formatEur(ca), color: "text-white" },
-                { label: "CA hors taxes (HT)", val: formatEur(calc.caHT), color: "text-white/70" },
-                { label: "— TVA DGFiP (20%)", val: `- ${formatEur(calc.tva)}`, color: "text-red-400" },
-                { label: "— URSSAF BNC (26.1% HT)", val: `- ${formatEur(calc.urssaf)}`, color: "text-red-400" },
-                { label: "— Formation pro CFP (0.2% HT)", val: `- ${formatEur(calc.cfp)}`, color: "text-red-400" },
-                { label: "— Impôt sur le revenu", val: `- ${formatEur(calc.ir)}`, color: "text-red-400" },
-              ].map(({ label, val, color }) => (
+                { label: "CA TTC", val: formatEur(ca), c: "text-white" },
+                { label: "CA HT", val: formatEur(calc.caHT), c: "text-white/60" },
+                { label: "– TVA", val: `- ${formatEur(calc.tva)}`, c: "text-red-400" },
+                { label: "– URSSAF", val: `- ${formatEur(calc.urssaf)}`, c: "text-red-400" },
+                { label: "– CFP", val: `- ${formatEur(calc.cfp)}`, c: "text-red-400" },
+                { label: "– IR (24%)", val: `- ${formatEur(calc.ir)}`, c: "text-red-400" },
+              ].map(({ label, val, c }) => (
                 <div key={label} className="flex justify-between items-center">
-                  <span className="text-white/50">{label}</span>
-                  <span className={`font-semibold ${color}`}>{val}</span>
+                  <span className="text-white/40">{label}</span>
+                  <span className={`font-semibold ${c}`}>{val}</span>
                 </div>
               ))}
-              <div className="border-t border-white/10 mt-1 pt-3 flex justify-between items-center">
-                <span className="font-bold text-emerald-300">= Net à te virer</span>
-                <span className="text-xl font-black text-emerald-400">{formatEur(calc.net)}</span>
+              <div className="border-t border-white/8 mt-1 pt-2 flex justify-between items-center">
+                <span className="font-bold text-emerald-300 text-xs">= Net</span>
+                <span className="text-base font-black text-emerald-400">{formatEur(calc.net)}</span>
               </div>
             </div>
-          </div>
 
-          {/* Tranches IR */}
-          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
-            <div className="text-sm font-medium text-white/50 uppercase tracking-wider">Tranches d&apos;imposition</div>
-            <div className="flex flex-col gap-1">
+            {/* Tranches IR compactes */}
+            <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-1">
+              <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-1">Tranches IR</div>
               {IR_TRANCHES.map((t, i) => {
                 const prev = i === 0 ? 0 : IR_TRANCHES[i - 1].max;
                 const isActive = calc.revenuImposable > prev;
                 return (
-                  <div key={i} className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 transition-all ${isActive ? "bg-white/5 text-white" : "text-white/20"}`}>
-                    <span>
+                  <div key={i} className={`flex items-center justify-between text-xs rounded-lg px-2 py-1 transition-all ${isActive ? "bg-white/5 text-white" : "text-white/20"}`}>
+                    <span className="text-[10px]">
                       {i === IR_TRANCHES.length - 1
                         ? `> ${new Intl.NumberFormat("fr-FR").format(prev)} €`
                         : `${new Intl.NumberFormat("fr-FR").format(prev)} – ${new Intl.NumberFormat("fr-FR").format(t.max)} €`}
                     </span>
-                    <span className={`font-bold ${isActive ? "text-yellow-400" : ""}`}>{(t.rate * 100).toFixed(0)} %</span>
+                    <span className={`font-bold text-[10px] ${isActive ? "text-yellow-400" : ""}`}>{(t.rate * 100).toFixed(0)} %</span>
                   </div>
                 );
               })}
+              <div className="border-t border-white/5 mt-1 pt-2 flex justify-between text-[10px]">
+                <span className="text-white/30">Revenu imposable</span>
+                <span className="text-white/60 font-semibold">{formatEur(calc.revenuImposable)}</span>
+              </div>
             </div>
-            <div className="border-t border-white/5 pt-3 flex justify-between text-sm">
-              <span className="text-white/50">Revenu imposable (après URSSAF)</span>
-              <span className="font-semibold">{formatEur(calc.revenuImposable)}</span>
-            </div>
-          </div>
-
-          <div className="text-center text-xs text-white/20 pb-2">
-            Calculs basés sur les taux 2025 • Non contractuel
           </div>
         </div>
 
-        {/* Colonne droite — Graphes + Factures */}
-        <div className="w-full flex flex-col gap-5 min-w-0">
-          <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
-          <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
-        </div>
+        {/* Ligne 2 : Graphes */}
+        <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
+
+        {/* Ligne 3 : Factures Gmail */}
+        <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
 
       </div>
     </main>
