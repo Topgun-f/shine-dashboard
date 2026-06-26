@@ -136,6 +136,20 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
     return max;
   }, [factures, annee]);
 
+  // Map: mois d'encaissement (index) → nom long du mois de facturation associé
+  const factureParEncaissement = useMemo(() => {
+    const map: Record<number, string> = {};
+    for (const f of factures) {
+      const info = extractMoisFacture(f.sujet);
+      if (!info) continue;
+      const { mois, annee: anneeEnc } = moisEncaissement(info.moisIdx, info.annee);
+      if (anneeEnc === annee) {
+        map[mois] = `${MOIS_NOMS_LONG[info.moisIdx]} ${info.annee}`;
+      }
+    }
+    return map;
+  }, [factures, annee]);
+
   const maxCA = Math.max(...moisData.map((p) => p.ca), 1);
   const maxCumul = Math.max(...moisData.slice(0, dernierMoisCourbe + 1).map((p) => p.cumul), 1);
   const totalEncaisse = dernierMoisCourbe >= 0 ? moisData[dernierMoisCourbe].cumul : 0;
@@ -206,7 +220,12 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
           <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA encaissé par mois {annee}</div>
           <span className="text-xs text-white/40">
             {hoverHisto !== null && hoverHisto <= dernierMoisCourbe
-              ? <>{moisData[hoverHisto].nomLong} <span className="font-bold text-indigo-300">{formatEur(moisData[hoverHisto].ca)}</span></>
+              ? <>
+                  {moisData[hoverHisto].nomLong} <span className="font-bold text-indigo-300">{formatEur(moisData[hoverHisto].ca)}</span>
+                  {factureParEncaissement[hoverHisto] && (
+                    <span className="ml-2 text-white/30">· Facture {factureParEncaissement[hoverHisto]}</span>
+                  )}
+                </>
               : <span className="font-bold text-white">{formatEur(totalEncaisse)}</span>
             }
           </span>
@@ -253,7 +272,12 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
           <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA cumulé {annee}</div>
           <span className="text-xs text-white/40">
             {hoverCurve !== null && moisData[hoverCurve].cumul > 0
-              ? <>{moisData[hoverCurve].nomLong} <span className="font-bold text-emerald-300">{formatEur(moisData[hoverCurve].cumul)}</span></>
+              ? <>
+                  {moisData[hoverCurve].nomLong} <span className="font-bold text-emerald-300">{formatEur(moisData[hoverCurve].cumul)}</span>
+                  {factureParEncaissement[hoverCurve] && (
+                    <span className="ml-2 text-white/30">· Facture {factureParEncaissement[hoverCurve]}</span>
+                  )}
+                </>
               : <>Total encaissé <span className="font-bold text-white">{formatEur(totalEncaisse)}</span></>
             }
           </span>
