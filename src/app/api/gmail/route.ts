@@ -130,11 +130,18 @@ export async function GET(req: Request) {
     })
   );
 
-  factures.sort((a, b) => {
-    if (a.isShine && !b.isShine) return -1;
-    if (!a.isShine && b.isShine) return 1;
-    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  // Garde uniquement les factures Shine dont le sujet correspond au pattern
+  // "Facture <Mois> <Année> de FICHANT MAVRICK" ou "de MONSIEUR MAVRICK FICHANT"
+  const factureShinePattern = /Facture\s+\w+\s+\d{4}\s+de\s+(FICHANT\s+MAVRICK|MONSIEUR\s+MAVRICK\s+FICHANT)/i;
+
+  const facturesFiltrees = factures.filter((f) => {
+    if (!f.isShine) return false;
+    return factureShinePattern.test(f.sujet);
   });
 
-  return NextResponse.json({ factures });
+  facturesFiltrees.sort((a, b) =>
+    new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+
+  return NextResponse.json({ factures: facturesFiltrees });
 }
