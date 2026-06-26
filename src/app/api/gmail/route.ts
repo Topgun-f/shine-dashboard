@@ -137,15 +137,12 @@ export async function GET(req: Request) {
     juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
   };
 
-  // 45 jours fin de mois : on ajoute 45j à la date d'émission puis on va à la fin du mois résultant
+  // Encaissement = mois facture + 2 mois (mars → mai, avril → juin, etc.)
   function dateEncaissement(moisNom: string, annee: number): string {
     const moisIdx = MOIS_FR[moisNom.toLowerCase()];
     if (moisIdx === undefined) return "";
-    const emission = new Date(annee, moisIdx, 1);
-    emission.setDate(emission.getDate() + 45);
-    // Fin du mois résultant
-    const finMois = new Date(emission.getFullYear(), emission.getMonth() + 1, 0);
-    return finMois.toISOString().split("T")[0];
+    const d = new Date(annee, moisIdx + 2, 1);
+    return d.toISOString().split("T")[0];
   }
 
   const facturesFiltrees = factures

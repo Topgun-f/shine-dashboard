@@ -85,10 +85,9 @@ const MOIS_FR_IDX: Record<string, number> = {
   juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
 };
 
-// 45j fin de mois : retourne le mois d'encaissement (0-11) et l'année
+// Encaissement = mois facture + 2 mois (mars → mai, avril → juin, etc.)
 function moisEncaissement(moisFactureIdx: number, anneeFacture: number): { mois: number; annee: number } {
-  const d = new Date(anneeFacture, moisFactureIdx, 1);
-  d.setDate(d.getDate() + 45);
+  const d = new Date(anneeFacture, moisFactureIdx + 2, 1);
   return { mois: d.getMonth(), annee: d.getFullYear() };
 }
 
