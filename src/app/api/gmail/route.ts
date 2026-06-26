@@ -4,11 +4,19 @@ import { google } from "googleapis";
 import { authOptions } from "@/lib/authOptions";
 
 function extractMontant(text: string): number | null {
-  const match = text.match(/(\d[\d\s]*[.,]\d{2})\s*€|€\s*(\d[\d\s]*[.,]\d{2})/);
-  if (!match) return null;
-  const raw = (match[1] || match[2]).replace(/\s/g, "").replace(",", ".");
-  const val = parseFloat(raw);
-  return isNaN(val) ? null : val;
+  // Cherche tous les montants au format "1 234,56 €" ou "€ 1 234,56"
+  // On limite à 3 groupes de chiffres max (évite de capturer "2026 12 720")
+  const regex = /(\d{1,3}(?:[\s]\d{3}){0,2}[.,]\d{2})\s*€|€\s*(\d{1,3}(?:[\s]\d{3}){0,2}[.,]\d{2})/g;
+  const candidates: number[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(text)) !== null) {
+    const raw = (m[1] || m[2]).replace(/\s/g, "").replace(",", ".");
+    const val = parseFloat(raw);
+    if (!isNaN(val) && val >= 1 && val <= 99999) candidates.push(val);
+  }
+  if (candidates.length === 0) return null;
+  // Retourne le montant le plus élevé (généralement le total TTC)
+  return Math.max(...candidates);
 }
 
 function decodeBase64(data: string): string {
