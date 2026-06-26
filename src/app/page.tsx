@@ -6,6 +6,7 @@ import { useSession, signIn, signOut } from "next-auth/react";
 const TVA_RATE = 0.20;
 const URSSAF_RATE = 0.261;
 const CFP_RATE = 0.002;
+const TAUX_IR_FIXE = 0.24;
 
 const IR_TRANCHES = [
   { max: 11497, rate: 0 },
@@ -15,16 +16,16 @@ const IR_TRANCHES = [
   { max: Infinity, rate: 0.45 },
 ];
 
-function computeIR(revenuImposable: number): number {
-  let impot = 0;
-  let prev = 0;
-  for (const tranche of IR_TRANCHES) {
-    if (revenuImposable <= prev) break;
-    const trancheMax = Math.min(revenuImposable, tranche.max);
-    impot += (trancheMax - prev) * tranche.rate;
-    prev = tranche.max;
-  }
-  return impot;
+function computeCalc(ca: number) {
+  const tva = ca * (TVA_RATE / (1 + TVA_RATE));
+  const caHT = ca / (1 + TVA_RATE);
+  const urssaf = caHT * URSSAF_RATE;
+  const cfp = caHT * CFP_RATE;
+  const revenuImposable = caHT - urssaf - cfp;
+  const ir = revenuImposable * TAUX_IR_FIXE;
+  const net = revenuImposable - ir;
+  const tauxIREffectif = revenuImposable > 0 ? ir / revenuImposable : 0;
+  return { tva, caHT, urssaf, cfp, revenuImposable, ir, net, tauxIREffectif };
 }
 
 function formatEur(val: number) {
@@ -40,9 +41,9 @@ function formatPct(val: number) {
 }
 
 function StatCard({
-  label, value, sub, color, icon,
+  label, value, sub, color, icon, valueColor,
 }: {
-  label: string; value: string; sub?: string; color: string; icon: string;
+  label: string; value: string; sub?: string; color: string; icon: string; valueColor?: string;
 }) {
   return (
     <div className="relative overflow-hidden rounded-2xl p-5 flex flex-col gap-2 border border-white/5 bg-white/[0.03]">
@@ -51,7 +52,7 @@ function StatCard({
         <span className="text-lg">{icon}</span>
         {label}
       </div>
-      <div className="text-2xl font-bold tracking-tight">{value}</div>
+      <div className={`text-2xl font-bold tracking-tight ${valueColor ?? "text-white"}`}>{value}</div>
       {sub && <div className="text-xs text-white/40">{sub}</div>}
     </div>
   );
@@ -75,6 +76,108 @@ const PERIODES = [
   { label: "Cette année", value: "365d" },
 ];
 
+const MOIS_OPTIONS = [3, 6, 9, 12];
+
+function CACurve({ ca, mois }: { ca: number; mois: number }) {
+  const points = useMemo(() => {
+    return Array.from({ length: mois }, (_, i) => ({
+      mois: i + 1,
+      caTotal: ca * (i + 1),
+      net: computeCalc(ca).net * (i + 1),
+    }));
+  }, [ca, mois]);
+
+  const maxVal = points[points.length - 1]?.caTotal ?? 1;
+  const W = 560;
+  const H = 160;
+  const PAD = { top: 16, right: 16, bottom: 32, left: 56 };
+  const innerW = W - PAD.left - PAD.right;
+  const innerH = H - PAD.top - PAD.bottom;
+
+  const xScale = (i: number) => PAD.left + (i / (mois - 1 || 1)) * innerW;
+  const yScale = (v: number) => PAD.top + innerH - (v / maxVal) * innerH;
+
+  const pathCA = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.caTotal)}`)
+    .join(" ");
+  const pathNet = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.net)}`)
+    .join(" ");
+
+  const areaNet =
+    pathNet +
+    ` L ${xScale(mois - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
+
+  return (
+    <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium text-white/50 uppercase tracking-wider">Projection sur {mois} mois</div>
+        <div className="flex flex-col items-end gap-0.5">
+          <span className="text-xs text-white/40">CA total <span className="font-bold text-white">{formatEur(ca * mois)}</span></span>
+          <span className="text-xs text-white/40">Net total <span className="font-bold text-emerald-400">{formatEur(computeCalc(ca).net * mois)}</span></span>
+        </div>
+      </div>
+
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+        {/* Grille horizontale */}
+        {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+          const y = yScale(maxVal * t);
+          return (
+            <g key={t}>
+              <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
+              <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.25)">
+                {formatEur(maxVal * t)}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Aire net */}
+        <defs>
+          <linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+        <path d={areaNet} fill="url(#netGrad)" />
+
+        {/* Ligne CA total */}
+        <path d={pathCA} fill="none" stroke="rgba(99,102,241,0.7)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+
+        {/* Ligne Net */}
+        <path d={pathNet} fill="none" stroke="#10b981" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+
+        {/* Labels mois */}
+        {points.map((p, i) => (
+          <text key={i} x={xScale(i)} y={H - 6} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.25)">
+            M{p.mois}
+          </text>
+        ))}
+
+        {/* Points CA */}
+        {points.map((p, i) => (
+          <circle key={`ca-${i}`} cx={xScale(i)} cy={yScale(p.caTotal)} r={3} fill="rgba(99,102,241,0.9)" />
+        ))}
+
+        {/* Points Net */}
+        {points.map((p, i) => (
+          <circle key={`net-${i}`} cx={xScale(i)} cy={yScale(p.net)} r={3} fill="#10b981" />
+        ))}
+      </svg>
+
+      {/* Légende */}
+      <div className="flex gap-4 text-xs text-white/40">
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 bg-indigo-400 inline-block rounded" />CA total (TTC)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-3 h-0.5 bg-emerald-400 inline-block rounded" />Net disponible
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void }) {
   const { data: session, status } = useSession();
   const [factures, setFactures] = useState<Facture[]>([]);
@@ -95,7 +198,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
       newSelected.delete(facture.id!);
     } else {
       newSelected.add(facture.id!);
-      // Lire le PDF si pas encore fait
       if (!pdfResults[facture.id!] && (facture.attachments?.length ?? 0) > 0) {
         setPdfLoading(facture.id!);
         try {
@@ -187,7 +289,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
 
   return (
     <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center text-base">📧</div>
@@ -213,9 +314,7 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
         </div>
       </div>
 
-      {/* Filtres */}
       <div className="flex flex-col gap-3 border border-white/5 rounded-xl p-3 bg-white/[0.02]">
-        {/* Toggle preset / custom */}
         <div className="flex gap-2">
           <button
             onClick={() => setModeDate("preset")}
@@ -231,7 +330,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
           </button>
         </div>
 
-        {/* Périodes prédéfinies */}
         {modeDate === "preset" && (
           <div className="flex flex-wrap gap-2">
             {PERIODES.map((p) => (
@@ -246,7 +344,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
           </div>
         )}
 
-        {/* Dates custom */}
         {modeDate === "custom" && (
           <div className="flex gap-2 items-center flex-wrap">
             <input
@@ -265,7 +362,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
           </div>
         )}
 
-        {/* Pattern */}
         <div className="flex gap-2 items-center">
           <input
             type="text"
@@ -311,7 +407,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
                       : "bg-white/[0.02] border-white/5 hover:bg-white/5"
                   }`}
                 >
-                  {/* Checkbox */}
                   <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 transition-all ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-white/20"}`}>
                     {isLoadingPdf ? (
                       <span className="text-xs animate-spin">⏳</span>
@@ -322,7 +417,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
                     ) : null}
                   </div>
 
-                  {/* Contenu */}
                   <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       {f.isShine && (
@@ -356,7 +450,6 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
                     )}
                   </div>
 
-                  {/* Montant */}
                   {montantAffiche !== null && (
                     <div className={`text-sm font-bold shrink-0 ${isSelected ? "text-emerald-400" : "text-white/50"}`}>
                       {formatEur(montantAffiche)}
@@ -384,13 +477,12 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
   );
 }
 
-const TAUX_IR_FIXE = 0.24;
-
 export default function Home() {
   const [ca, setCa] = useState<number>(154000);
   const [input, setInput] = useState("154000");
   const [caFromFactures, setCaFromFactures] = useState<number | null>(null);
   const [modeFacture, setModeFacture] = useState(false);
+  const [mois, setMois] = useState(12);
 
   const handleInjectCA = (montant: number) => {
     setCaFromFactures(montant);
@@ -406,17 +498,7 @@ export default function Home() {
     setInput("154000");
   };
 
-  const calc = useMemo(() => {
-    const tva = ca * (TVA_RATE / (1 + TVA_RATE));
-    const caHT = ca / (1 + TVA_RATE);
-    const urssaf = caHT * URSSAF_RATE;
-    const cfp = caHT * CFP_RATE;
-    const revenuImposable = caHT - urssaf - cfp;
-    const ir = revenuImposable * TAUX_IR_FIXE;
-    const net = revenuImposable - ir;
-    const tauxIREffectif = revenuImposable > 0 ? ir / revenuImposable : 0;
-    return { tva, caHT, urssaf, cfp, revenuImposable, ir, net, tauxIREffectif };
-  }, [ca, modeFacture]);
+  const calc = useMemo(() => computeCalc(ca), [ca]);
 
   const handleInput = (val: string) => {
     setInput(val);
@@ -500,11 +582,30 @@ export default function Home() {
 
       {/* Cards */}
       <div className="grid grid-cols-2 gap-3">
-        <StatCard label="TVA à rendre" value={formatEur(calc.tva)} sub="à la DGFiP • taux 20%" color="bg-red-500" icon="🏛️" />
-        <StatCard label="URSSAF" value={formatEur(calc.urssaf)} sub="BNC • taux 26.1%" color="bg-orange-500" icon="🏥" />
-        <StatCard label="Formation pro (CFP)" value={formatEur(calc.cfp)} sub="taux 0.2% du CA HT" color="bg-purple-500" icon="🎓" />
-        <StatCard label="Impôt sur le revenu" value={formatEur(calc.ir)} sub={`Taux effectif ${formatPct(calc.tauxIREffectif)}`} color="bg-yellow-500" icon="📊" />
-        <StatCard label="Net disponible" value={formatEur(calc.net)} sub={`${netPct.toFixed(0)}% de ton CA TTC`} color="bg-emerald-500" icon="💸" />
+        <StatCard label="TVA à rendre" value={`- ${formatEur(calc.tva)}`} sub="à la DGFiP • taux 20%" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
+        <StatCard label="URSSAF" value={`- ${formatEur(calc.urssaf)}`} sub="BNC • taux 26.1%" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
+        <StatCard label="Formation pro (CFP)" value={`- ${formatEur(calc.cfp)}`} sub="taux 0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
+        <StatCard label="Impôt sur le revenu" value={`- ${formatEur(calc.ir)}`} sub={`Taux effectif ${formatPct(calc.tauxIREffectif)}`} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
+        <StatCard label="Net disponible" value={formatEur(calc.net)} sub={`${netPct.toFixed(0)}% de ton CA TTC`} color="bg-emerald-500" icon="💸" valueColor="text-emerald-400" />
+      </div>
+
+      {/* Courbe CA */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs text-white/40 font-medium uppercase tracking-wider">Nombre de mois</div>
+          <div className="flex gap-2">
+            {MOIS_OPTIONS.map((m) => (
+              <button
+                key={m}
+                onClick={() => setMois(m)}
+                className={`text-xs rounded-lg px-3 py-1.5 transition-all ${mois === m ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
+              >
+                {m} mois
+              </button>
+            ))}
+          </div>
+        </div>
+        <CACurve ca={ca} mois={mois} />
       </div>
 
       {/* Détail tranches IR */}
@@ -540,9 +641,9 @@ export default function Home() {
             { label: "CA encaissé (TTC)", val: formatEur(ca), color: "text-white" },
             { label: "CA hors taxes (HT)", val: formatEur(calc.caHT), color: "text-white/70" },
             { label: "— TVA DGFiP (20%)", val: `- ${formatEur(calc.tva)}`, color: "text-red-400" },
-            { label: "— URSSAF BNC (26.1% HT)", val: `- ${formatEur(calc.urssaf)}`, color: "text-orange-400" },
-            { label: "— Formation pro CFP (0.2% HT)", val: `- ${formatEur(calc.cfp)}`, color: "text-purple-400" },
-            { label: "— Impôt sur le revenu", val: `- ${formatEur(calc.ir)}`, color: "text-yellow-400" },
+            { label: "— URSSAF BNC (26.1% HT)", val: `- ${formatEur(calc.urssaf)}`, color: "text-red-400" },
+            { label: "— Formation pro CFP (0.2% HT)", val: `- ${formatEur(calc.cfp)}`, color: "text-red-400" },
+            { label: "— Impôt sur le revenu", val: `- ${formatEur(calc.ir)}`, color: "text-red-400" },
           ].map(({ label, val, color }) => (
             <div key={label} className="flex justify-between items-center">
               <span className="text-white/50">{label}</span>
