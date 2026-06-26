@@ -76,63 +76,80 @@ const PERIODES = [
   { label: "Cette année", value: "365d" },
 ];
 
-const MOIS_OPTIONS = [3, 6, 9, 12];
+const MOIS_NOMS_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
+const MOIS_NOMS_COURT = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
 
-const MOIS_NOMS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
+interface PointMois {
+  key: string;       // "2026-06"
+  nomCourt: string;  // "Juin"
+  nomLong: string;   // "Juin 2026"
+  ca: number;
+}
 
-function CACurve({ ca, mois }: { ca: number; mois: number }) {
+function CACurve({ factures }: { factures: Facture[] }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
-  const startMonth = new Date().getMonth(); // mois courant = mois 1
+  const points: PointMois[] = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const f of factures) {
+      if (!f.isShine || !f.montant) continue;
+      const d = new Date(f.date);
+      if (isNaN(d.getTime())) continue;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      map.set(key, (map.get(key) ?? 0) + f.montant);
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, ca]) => {
+        const [year, month] = key.split("-").map(Number);
+        return {
+          key,
+          nomCourt: MOIS_NOMS_COURT[month - 1],
+          nomLong: `${MOIS_NOMS_LONG[month - 1]} ${year}`,
+          ca,
+        };
+      });
+  }, [factures]);
 
-  const points = useMemo(() => {
-    const netMensuel = computeCalc(ca).net;
-    return Array.from({ length: mois }, (_, i) => ({
-      idx: i,
-      nomMois: MOIS_NOMS[(startMonth + i) % 12],
-      caTotal: ca * (i + 1),
-      net: netMensuel * (i + 1),
-    }));
-  }, [ca, mois, startMonth]);
+  if (points.length === 0) {
+    return (
+      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 text-sm text-white/30 text-center py-8">
+        Aucune facture Shine avec montant détecté
+      </div>
+    );
+  }
 
-  const maxVal = points[points.length - 1]?.caTotal ?? 1;
+  const maxCA = Math.max(...points.map((p) => p.ca));
+  const n = points.length;
   const W = 560;
   const H = 180;
   const PAD = { top: 16, right: 16, bottom: 36, left: 60 };
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
-  const xScale = (i: number) => PAD.left + (i / (mois - 1 || 1)) * innerW;
-  const yScale = (v: number) => PAD.top + innerH - (v / maxVal) * innerH;
+  const xScale = (i: number) => PAD.left + (i / (n - 1 || 1)) * innerW;
+  const yScale = (v: number) => PAD.top + innerH - (v / (maxCA || 1)) * innerH;
 
   const pathCA = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.caTotal)}`)
-    .join(" ");
-  const pathNet = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.net)}`)
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.ca)}`)
     .join(" ");
 
-  const areaNet =
-    pathNet +
-    ` L ${xScale(mois - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
+  const areaCA =
+    pathCA +
+    ` L ${xScale(n - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
 
   const hovered = hoverIdx !== null ? points[hoverIdx] : null;
+  const totalCA = points.reduce((s, p) => s + p.ca, 0);
 
   return (
     <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-white/50 uppercase tracking-wider">Projection sur {mois} mois</div>
+        <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA Shine — {points[0]?.nomLong} → {points[n - 1]?.nomLong}</div>
         <div className="flex flex-col items-end gap-0.5">
           {hovered ? (
-            <>
-              <span className="text-xs text-white/40">{hovered.nomMois} — CA cumulé <span className="font-bold text-white">{formatEur(hovered.caTotal)}</span></span>
-              <span className="text-xs text-white/40">{hovered.nomMois} — Net cumulé <span className="font-bold text-emerald-400">{formatEur(hovered.net)}</span></span>
-            </>
+            <span className="text-xs text-white/40">{hovered.nomLong} <span className="font-bold text-white">{formatEur(hovered.ca)}</span></span>
           ) : (
-            <>
-              <span className="text-xs text-white/40">CA total <span className="font-bold text-white">{formatEur(ca * mois)}</span></span>
-              <span className="text-xs text-white/40">Net total <span className="font-bold text-emerald-400">{formatEur(computeCalc(ca).net * mois)}</span></span>
-            </>
+            <span className="text-xs text-white/40">Total <span className="font-bold text-white">{formatEur(totalCA)}</span></span>
           )}
         </div>
       </div>
@@ -144,68 +161,66 @@ function CACurve({ ca, mois }: { ca: number; mois: number }) {
         onMouseLeave={() => setHoverIdx(null)}
       >
         <defs>
-          <linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+          <linearGradient id="caGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.30" />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
           </linearGradient>
         </defs>
 
         {/* Grille horizontale */}
         {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-          const y = yScale(maxVal * t);
+          const y = yScale(maxCA * t);
           return (
             <g key={t}>
               <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
               <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.25)">
-                {formatEur(maxVal * t)}
+                {formatEur(maxCA * t)}
               </text>
             </g>
           );
         })}
 
-        {/* Aire net */}
-        <path d={areaNet} fill="url(#netGrad)" />
+        {/* Aire CA */}
+        <path d={areaCA} fill="url(#caGrad)" />
 
-        {/* Ligne CA total */}
-        <path d={pathCA} fill="none" stroke="rgba(99,102,241,0.7)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        {/* Ligne CA */}
+        <path d={pathCA} fill="none" stroke="rgba(99,102,241,0.9)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
 
-        {/* Ligne Net */}
-        <path d={pathNet} fill="none" stroke="#10b981" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-
-        {/* Labels mois sur l'axe X */}
+        {/* Labels mois axe X */}
         {points.map((p, i) => (
           <text key={i} x={xScale(i)} y={H - 8} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.30)">
-            {p.nomMois}
+            {p.nomCourt}
           </text>
         ))}
 
-        {/* Points CA */}
+        {/* Points */}
         {points.map((p, i) => (
-          <circle key={`ca-${i}`} cx={xScale(i)} cy={yScale(p.caTotal)} r={hoverIdx === i ? 5 : 3} fill="rgba(99,102,241,0.9)" style={{ transition: "r 0.1s" }} />
+          <circle
+            key={i}
+            cx={xScale(i)} cy={yScale(p.ca)}
+            r={hoverIdx === i ? 6 : 3}
+            fill={hoverIdx === i ? "#6366f1" : "rgba(99,102,241,0.9)"}
+            stroke={hoverIdx === i ? "white" : "none"}
+            strokeWidth={1.5}
+          />
         ))}
 
-        {/* Points Net */}
-        {points.map((p, i) => (
-          <circle key={`net-${i}`} cx={xScale(i)} cy={yScale(p.net)} r={hoverIdx === i ? 5 : 3} fill="#10b981" style={{ transition: "r 0.1s" }} />
-        ))}
-
-        {/* Ligne verticale de hover */}
+        {/* Ligne verticale hover */}
         {hoverIdx !== null && (
           <line
             x1={xScale(hoverIdx)} x2={xScale(hoverIdx)}
             y1={PAD.top} y2={PAD.top + innerH}
-            stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="4 3"
+            stroke="rgba(255,255,255,0.2)" strokeWidth={1} strokeDasharray="4 3"
           />
         )}
 
-        {/* Zones de capture hover invisibles */}
-        {points.map((p, i) => {
-          const x = xScale(i);
-          const slotW = innerW / (mois - 1 || 1);
+        {/* Zones hover invisibles */}
+        {points.map((_, i) => {
+          const slotW = n > 1 ? innerW / (n - 1) : innerW;
           return (
             <rect
               key={`hover-${i}`}
-              x={x - slotW / 2}
+              x={xScale(i) - slotW / 2}
               y={PAD.top}
               width={slotW}
               height={innerH}
@@ -216,20 +231,22 @@ function CACurve({ ca, mois }: { ca: number; mois: number }) {
         })}
       </svg>
 
-      {/* Légende */}
       <div className="flex gap-4 text-xs text-white/40">
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-0.5 bg-indigo-400 inline-block rounded" />CA total (TTC)
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="w-3 h-0.5 bg-emerald-400 inline-block rounded" />Net disponible
+          <span className="w-3 h-0.5 bg-indigo-400 inline-block rounded" />CA mensuel Shine (TTC)
         </span>
       </div>
     </div>
   );
 }
 
-function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void }) {
+function GmailSection({
+  onInjectCA,
+  onFacturesLoaded,
+}: {
+  onInjectCA: (montant: number) => void;
+  onFacturesLoaded: (factures: Facture[]) => void;
+}) {
   const { data: session, status } = useSession();
   const [factures, setFactures] = useState<Facture[]>([]);
   const [loading, setLoading] = useState(false);
@@ -237,11 +254,12 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
   const [periode, setPeriode] = useState("365d");
   const [dateDebut, setDateDebut] = useState("");
   const [dateFin, setDateFin] = useState("");
-  const [pattern, setPattern] = useState("");
   const [modeDate, setModeDate] = useState<"preset" | "custom">("preset");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [pdfLoading, setPdfLoading] = useState<string | null>(null);
   const [pdfResults, setPdfResults] = useState<Record<string, { montant: number | null; tous: number[] }>>({});
+
+  const shineFactures = useMemo(() => factures.filter((f) => f.isShine), [factures]);
 
   const toggleSelect = async (facture: Facture) => {
     const newSelected = new Set(selectedIds);
@@ -282,24 +300,27 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
       } else {
         params.set("periode", periode);
       }
-      if (pattern.trim()) params.set("pattern", pattern.trim());
+      // Toujours filtrer sur shine uniquement
+      params.set("pattern", "facture@shine.fr");
 
       const res = await fetch(`/api/gmail?${params.toString()}`);
       if (!res.ok) throw new Error("Erreur lors de la récupération");
       const data = await res.json();
-      setFactures(data.factures || []);
+      const loaded: Facture[] = data.factures || [];
+      setFactures(loaded);
+      onFacturesLoaded(loaded);
     } catch {
       setError("Impossible de charger les factures.");
     } finally {
       setLoading(false);
     }
-  }, [periode, dateDebut, dateFin, pattern, modeDate]);
+  }, [periode, dateDebut, dateFin, modeDate, onFacturesLoaded]);
 
   useEffect(() => {
     if (session) fetchFactures();
   }, [session, fetchFactures]);
 
-  const totalFactures = factures
+  const totalShine = shineFactures
     .filter((f) => f.montant !== null)
     .reduce((sum, f) => sum + (f.montant || 0), 0);
 
@@ -318,7 +339,7 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-xl shrink-0">📧</div>
           <div>
-            <div className="font-semibold text-sm">Import Gmail — Factures automatiques</div>
+            <div className="font-semibold text-sm">Import Gmail — Factures Shine</div>
             <div className="text-xs text-white/40">Connecte ton compte Google pour lire tes factures</div>
           </div>
         </div>
@@ -342,10 +363,10 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
     <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-green-500/20 flex items-center justify-center text-base">📧</div>
+          <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center text-base">📧</div>
           <div>
-            <div className="font-semibold text-sm">Gmail connecté</div>
-            <div className="text-xs text-white/40">{session.user?.email}</div>
+            <div className="font-semibold text-sm">Factures Shine</div>
+            <div className="text-xs text-white/40">facture@shine.fr • {session.user?.email}</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -365,6 +386,7 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
         </div>
       </div>
 
+      {/* Filtres période */}
       <div className="flex flex-col gap-3 border border-white/5 rounded-xl p-3 bg-white/[0.02]">
         <div className="flex gap-2">
           <button
@@ -412,35 +434,22 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
             />
           </div>
         )}
-
-        <div className="flex gap-2 items-center">
-          <input
-            type="text"
-            value={pattern}
-            onChange={(e) => setPattern(e.target.value)}
-            placeholder="Filtrer par mot-clé (ex: shine, stripe, paypal…)"
-            className="flex-1 text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white placeholder-white/20 outline-none focus:border-indigo-500/60 transition-all"
-          />
-          {pattern && (
-            <button onClick={() => setPattern("")} className="text-white/30 hover:text-white/60 text-xs transition-all">✕</button>
-          )}
-        </div>
       </div>
 
       {error && (
         <div className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</div>
       )}
 
-      {!loading && factures.length > 0 && (
+      {!loading && shineFactures.length > 0 && (
         <>
           <div className="flex items-center justify-between text-sm border-b border-white/5 pb-3">
-            <span className="text-white/50">{factures.length} facture{factures.length > 1 ? "s" : ""} trouvée{factures.length > 1 ? "s" : ""}</span>
-            {totalFactures > 0 && (
-              <span className="font-bold text-emerald-400">{formatEur(totalFactures)} total</span>
+            <span className="text-white/50">{shineFactures.length} facture{shineFactures.length > 1 ? "s" : ""} Shine</span>
+            {totalShine > 0 && (
+              <span className="font-bold text-emerald-400">{formatEur(totalShine)} total</span>
             )}
           </div>
           <div className="flex flex-col gap-2 max-h-96 overflow-y-auto pr-1">
-            {factures.map((f) => {
+            {shineFactures.map((f) => {
               const isSelected = selectedIds.has(f.id!);
               const isLoadingPdf = pdfLoading === f.id;
               const pdfResult = pdfResults[f.id!];
@@ -453,9 +462,7 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
                   className={`flex items-start gap-3 rounded-xl px-3 py-2.5 border cursor-pointer transition-all ${
                     isSelected
                       ? "bg-emerald-500/10 border-emerald-500/30"
-                      : f.isShine
-                      ? "bg-indigo-500/5 border-indigo-500/20 hover:bg-indigo-500/10"
-                      : "bg-white/[0.02] border-white/5 hover:bg-white/5"
+                      : "bg-indigo-500/5 border-indigo-500/20 hover:bg-indigo-500/10"
                   }`}
                 >
                   <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 transition-all ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-white/20"}`}>
@@ -469,14 +476,10 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
                   </div>
 
                   <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      {f.isShine && (
-                        <span className="text-xs bg-indigo-500/20 text-indigo-300 rounded-full px-2 py-0.5 font-medium shrink-0">Shine</span>
-                      )}
-                      <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
+                    <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
+                    <div className="text-xs text-white/20">
+                      {new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
                     </div>
-                    <div className="text-xs text-white/40 truncate">{f.expediteur}</div>
-                    <div className="text-xs text-white/20">{new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</div>
                     {(f.attachments?.length ?? 0) > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {f.attachments.map((a) => (
@@ -502,7 +505,7 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
                   </div>
 
                   {montantAffiche !== null && (
-                    <div className={`text-sm font-bold shrink-0 ${isSelected ? "text-emerald-400" : "text-white/50"}`}>
+                    <div className={`text-sm font-bold shrink-0 ${isSelected ? "text-emerald-400" : "text-indigo-300"}`}>
                       {formatEur(montantAffiche)}
                     </div>
                   )}
@@ -513,15 +516,15 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
         </>
       )}
 
-      {!loading && factures.length === 0 && !error && (
+      {!loading && shineFactures.length === 0 && !error && (
         <div className="text-sm text-white/30 text-center py-4">
-          Aucune facture trouvée dans les 90 derniers jours
+          Aucune facture Shine trouvée sur cette période
         </div>
       )}
 
       {loading && (
         <div className="text-sm text-white/40 text-center py-4 flex items-center justify-center gap-2">
-          <span className="animate-spin">⏳</span> Lecture de tes emails...
+          <span className="animate-spin">⏳</span> Lecture des factures Shine...
         </div>
       )}
     </div>
@@ -531,19 +534,16 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
 export default function Home() {
   const [ca, setCa] = useState<number>(154000);
   const [input, setInput] = useState("154000");
-  const [caFromFactures, setCaFromFactures] = useState<number | null>(null);
   const [modeFacture, setModeFacture] = useState(false);
-  const [mois, setMois] = useState(12);
+  const [shineFactures, setShineFactures] = useState<Facture[]>([]);
 
   const handleInjectCA = (montant: number) => {
-    setCaFromFactures(montant);
     setInput(String(montant));
     setCa(montant);
     setModeFacture(true);
   };
 
   const handleResetCA = () => {
-    setCaFromFactures(null);
     setModeFacture(false);
     setCa(154000);
     setInput("154000");
@@ -604,7 +604,7 @@ export default function Home() {
           {modeFacture && (
             <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mt-1">
               <span className="text-xs text-emerald-300 flex items-center gap-2">
-                📎 Mode facture — IR à taux effectif fixe 24%
+                📎 Montant issu d&apos;une facture — IR taux fixe 24%
               </span>
               <button onClick={handleResetCA} className="text-xs text-white/30 hover:text-white/60 transition-all">
                 ✕ Réinitialiser
@@ -640,24 +640,8 @@ export default function Home() {
         <StatCard label="Net disponible" value={formatEur(calc.net)} sub={`${netPct.toFixed(0)}% de ton CA TTC`} color="bg-emerald-500" icon="💸" valueColor="text-emerald-400" />
       </div>
 
-      {/* Courbe CA */}
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <div className="text-xs text-white/40 font-medium uppercase tracking-wider">Nombre de mois</div>
-          <div className="flex gap-2">
-            {MOIS_OPTIONS.map((m) => (
-              <button
-                key={m}
-                onClick={() => setMois(m)}
-                className={`text-xs rounded-lg px-3 py-1.5 transition-all ${mois === m ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
-              >
-                {m} mois
-              </button>
-            ))}
-          </div>
-        </div>
-        <CACurve ca={ca} mois={mois} />
-      </div>
+      {/* Courbe CA réel Shine */}
+      <CACurve factures={shineFactures} />
 
       {/* Détail tranches IR */}
       <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
@@ -708,8 +692,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Gmail */}
-      <GmailSection onInjectCA={handleInjectCA} />
+      {/* Gmail — Factures Shine uniquement */}
+      <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} />
 
       <div className="text-center text-xs text-white/20 pb-4">
         Calculs basés sur les taux 2025 • Non contractuel
