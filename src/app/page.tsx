@@ -78,19 +78,27 @@ const PERIODES = [
 
 const MOIS_OPTIONS = [3, 6, 9, 12];
 
+const MOIS_NOMS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
+
 function CACurve({ ca, mois }: { ca: number; mois: number }) {
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+
+  const startMonth = new Date().getMonth(); // mois courant = mois 1
+
   const points = useMemo(() => {
+    const netMensuel = computeCalc(ca).net;
     return Array.from({ length: mois }, (_, i) => ({
-      mois: i + 1,
+      idx: i,
+      nomMois: MOIS_NOMS[(startMonth + i) % 12],
       caTotal: ca * (i + 1),
-      net: computeCalc(ca).net * (i + 1),
+      net: netMensuel * (i + 1),
     }));
-  }, [ca, mois]);
+  }, [ca, mois, startMonth]);
 
   const maxVal = points[points.length - 1]?.caTotal ?? 1;
   const W = 560;
-  const H = 160;
-  const PAD = { top: 16, right: 16, bottom: 32, left: 56 };
+  const H = 180;
+  const PAD = { top: 16, right: 16, bottom: 36, left: 60 };
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
@@ -108,17 +116,40 @@ function CACurve({ ca, mois }: { ca: number; mois: number }) {
     pathNet +
     ` L ${xScale(mois - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
 
+  const hovered = hoverIdx !== null ? points[hoverIdx] : null;
+
   return (
     <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium text-white/50 uppercase tracking-wider">Projection sur {mois} mois</div>
         <div className="flex flex-col items-end gap-0.5">
-          <span className="text-xs text-white/40">CA total <span className="font-bold text-white">{formatEur(ca * mois)}</span></span>
-          <span className="text-xs text-white/40">Net total <span className="font-bold text-emerald-400">{formatEur(computeCalc(ca).net * mois)}</span></span>
+          {hovered ? (
+            <>
+              <span className="text-xs text-white/40">{hovered.nomMois} — CA cumulé <span className="font-bold text-white">{formatEur(hovered.caTotal)}</span></span>
+              <span className="text-xs text-white/40">{hovered.nomMois} — Net cumulé <span className="font-bold text-emerald-400">{formatEur(hovered.net)}</span></span>
+            </>
+          ) : (
+            <>
+              <span className="text-xs text-white/40">CA total <span className="font-bold text-white">{formatEur(ca * mois)}</span></span>
+              <span className="text-xs text-white/40">Net total <span className="font-bold text-emerald-400">{formatEur(computeCalc(ca).net * mois)}</span></span>
+            </>
+          )}
         </div>
       </div>
 
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full"
+        style={{ height: H }}
+        onMouseLeave={() => setHoverIdx(null)}
+      >
+        <defs>
+          <linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
+            <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
+          </linearGradient>
+        </defs>
+
         {/* Grille horizontale */}
         {[0, 0.25, 0.5, 0.75, 1].map((t) => {
           const y = yScale(maxVal * t);
@@ -133,12 +164,6 @@ function CACurve({ ca, mois }: { ca: number; mois: number }) {
         })}
 
         {/* Aire net */}
-        <defs>
-          <linearGradient id="netGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#10b981" stopOpacity="0.25" />
-            <stop offset="100%" stopColor="#10b981" stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
         <path d={areaNet} fill="url(#netGrad)" />
 
         {/* Ligne CA total */}
@@ -147,22 +172,48 @@ function CACurve({ ca, mois }: { ca: number; mois: number }) {
         {/* Ligne Net */}
         <path d={pathNet} fill="none" stroke="#10b981" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
 
-        {/* Labels mois */}
+        {/* Labels mois sur l'axe X */}
         {points.map((p, i) => (
-          <text key={i} x={xScale(i)} y={H - 6} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.25)">
-            M{p.mois}
+          <text key={i} x={xScale(i)} y={H - 8} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.30)">
+            {p.nomMois}
           </text>
         ))}
 
         {/* Points CA */}
         {points.map((p, i) => (
-          <circle key={`ca-${i}`} cx={xScale(i)} cy={yScale(p.caTotal)} r={3} fill="rgba(99,102,241,0.9)" />
+          <circle key={`ca-${i}`} cx={xScale(i)} cy={yScale(p.caTotal)} r={hoverIdx === i ? 5 : 3} fill="rgba(99,102,241,0.9)" style={{ transition: "r 0.1s" }} />
         ))}
 
         {/* Points Net */}
         {points.map((p, i) => (
-          <circle key={`net-${i}`} cx={xScale(i)} cy={yScale(p.net)} r={3} fill="#10b981" />
+          <circle key={`net-${i}`} cx={xScale(i)} cy={yScale(p.net)} r={hoverIdx === i ? 5 : 3} fill="#10b981" style={{ transition: "r 0.1s" }} />
         ))}
+
+        {/* Ligne verticale de hover */}
+        {hoverIdx !== null && (
+          <line
+            x1={xScale(hoverIdx)} x2={xScale(hoverIdx)}
+            y1={PAD.top} y2={PAD.top + innerH}
+            stroke="rgba(255,255,255,0.15)" strokeWidth={1} strokeDasharray="4 3"
+          />
+        )}
+
+        {/* Zones de capture hover invisibles */}
+        {points.map((p, i) => {
+          const x = xScale(i);
+          const slotW = innerW / (mois - 1 || 1);
+          return (
+            <rect
+              key={`hover-${i}`}
+              x={x - slotW / 2}
+              y={PAD.top}
+              width={slotW}
+              height={innerH}
+              fill="transparent"
+              onMouseEnter={() => setHoverIdx(i)}
+            />
+          );
+        })}
       </svg>
 
       {/* Légende */}
