@@ -685,143 +685,149 @@ export default function Home() {
   const netPct = ca > 0 ? (calc.net / ca) * 100 : 0;
 
   return (
-    <main className="min-h-screen px-4 py-8 max-w-2xl mx-auto flex flex-col gap-8">
+    <main className="min-h-screen px-4 py-6 max-w-screen-xl mx-auto flex flex-col gap-6">
       {/* Header */}
-      <div className="flex flex-col gap-1">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-indigo-500/20 flex items-center justify-center text-xl">💎</div>
-          <h1 className="text-2xl font-bold tracking-tight">Shine Dashboard</h1>
+      <div className="flex items-center gap-3">
+        <div className="w-9 h-9 rounded-xl bg-indigo-500/20 flex items-center justify-center text-xl">💎</div>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight leading-none">Shine Dashboard</h1>
+          <p className="text-white/40 text-xs mt-0.5">Micro-entreprise BNC • TVA 20%</p>
         </div>
-        <p className="text-white/40 text-sm pl-12">Micro-entreprise BNC • TVA 20%</p>
       </div>
 
-      {/* Saisie CA */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-6 flex flex-col gap-5">
-        <div className="flex flex-col gap-1">
-          <label className="text-sm text-white/50 font-medium">Chiffre d&apos;affaires encaissé (TTC)</label>
-          <div className="relative mt-1">
+      {/* Layout 2 colonnes sur grand écran */}
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+
+        {/* Colonne gauche — Simulateur */}
+        <div className="w-full lg:w-[420px] lg:shrink-0 flex flex-col gap-5">
+
+          {/* Saisie CA */}
+          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
+            <label className="text-sm text-white/50 font-medium">Chiffre d&apos;affaires encaissé (TTC)</label>
+            <div className="relative">
+              <input
+                type="number"
+                value={input}
+                onChange={(e) => handleInput(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pr-10 text-2xl font-bold outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+                min={0}
+                step={100}
+              />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 text-xl font-bold">€</span>
+            </div>
             <input
-              type="number"
-              value={input}
-              onChange={(e) => handleInput(e.target.value)}
-              className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 pr-10 text-2xl font-bold outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+              type="range"
               min={0}
+              max={200000}
               step={100}
+              value={ca}
+              onChange={(e) => {
+                setCa(Number(e.target.value));
+                setInput(String(e.target.value));
+              }}
             />
-            <span className="absolute right-4 top-1/2 -translate-y-1/2 text-white/30 text-xl font-bold">€</span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={200000}
-            step={100}
-            value={ca}
-            onChange={(e) => {
-              setCa(Number(e.target.value));
-              setInput(String(e.target.value));
-            }}
-            className="mt-3"
-          />
-          <div className="flex justify-between text-xs text-white/20 mt-1">
-            <span>0 €</span>
-            <span>200 000 €</span>
-          </div>
-          {modeFacture && (
-            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mt-1">
-              <span className="text-xs text-emerald-300 flex items-center gap-2">
-                📎 Montant issu d&apos;une facture — IR taux fixe 24%
-              </span>
-              <button onClick={handleResetCA} className="text-xs text-white/30 hover:text-white/60 transition-all">
-                ✕ Réinitialiser
-              </button>
+            <div className="flex justify-between text-xs text-white/20 -mt-2">
+              <span>0 €</span>
+              <span>200 000 €</span>
             </div>
-          )}
-        </div>
-
-        {/* Barre de répartition */}
-        <div className="flex flex-col gap-2">
-          <div className="text-xs text-white/40 font-medium uppercase tracking-wider">Répartition du CA</div>
-          <div className="flex h-3 rounded-full overflow-hidden gap-px">
-            <div className="bg-red-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.tva / ca) * 100}%` : "0%" }} />
-            <div className="bg-orange-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.urssaf / ca) * 100}%` : "0%" }} />
-            <div className="bg-yellow-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.ir / ca) * 100}%` : "0%" }} />
-            <div className="bg-emerald-500/80 transition-all duration-300 flex-1 min-w-0" />
-          </div>
-          <div className="flex flex-wrap gap-3 text-xs text-white/40">
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500/80 inline-block" />TVA</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500/80 inline-block" />URSSAF</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500/80 inline-block" />Impôt</span>
-            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500/80 inline-block" />Net</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Cards */}
-      <div className="grid grid-cols-2 gap-3">
-        <StatCard label="TVA à rendre" value={`- ${formatEur(calc.tva)}`} sub="à la DGFiP • taux 20%" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
-        <StatCard label="URSSAF" value={`- ${formatEur(calc.urssaf)}`} sub="BNC • taux 26.1%" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
-        <StatCard label="Formation pro (CFP)" value={`- ${formatEur(calc.cfp)}`} sub="taux 0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
-        <StatCard label="Impôt sur le revenu" value={`- ${formatEur(calc.ir)}`} sub={`Taux effectif ${formatPct(calc.tauxIREffectif)}`} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
-        <StatCard label="Net disponible" value={formatEur(calc.net)} sub={`${netPct.toFixed(0)}% de ton CA TTC`} color="bg-emerald-500" icon="💸" valueColor="text-emerald-400" />
-      </div>
-
-      {/* Courbe CA réel Shine */}
-      <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
-
-      {/* Détail tranches IR */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
-        <div className="text-sm font-medium text-white/50 uppercase tracking-wider">Tranches d&apos;imposition</div>
-        <div className="flex flex-col gap-1">
-          {IR_TRANCHES.map((t, i) => {
-            const prev = i === 0 ? 0 : IR_TRANCHES[i - 1].max;
-            const isActive = calc.revenuImposable > prev;
-            return (
-              <div key={i} className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 transition-all ${isActive ? "bg-white/5 text-white" : "text-white/20"}`}>
-                <span>
-                  {i === IR_TRANCHES.length - 1
-                    ? `> ${new Intl.NumberFormat("fr-FR").format(prev)} €`
-                    : `${new Intl.NumberFormat("fr-FR").format(prev)} – ${new Intl.NumberFormat("fr-FR").format(t.max)} €`}
+            {modeFacture && (
+              <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
+                <span className="text-xs text-emerald-300 flex items-center gap-2">
+                  📎 Montant issu d&apos;une facture — IR taux fixe 24%
                 </span>
-                <span className={`font-bold ${isActive ? "text-yellow-400" : ""}`}>{(t.rate * 100).toFixed(0)} %</span>
+                <button onClick={handleResetCA} className="text-xs text-white/30 hover:text-white/60 transition-all">
+                  ✕ Réinitialiser
+                </button>
               </div>
-            );
-          })}
-        </div>
-        <div className="border-t border-white/5 pt-3 flex justify-between text-sm">
-          <span className="text-white/50">Revenu imposable (après URSSAF)</span>
-          <span className="font-semibold">{formatEur(calc.revenuImposable)}</span>
-        </div>
-      </div>
+            )}
 
-      {/* Récap final */}
-      <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 flex flex-col gap-3">
-        <div className="text-sm font-medium text-indigo-300 uppercase tracking-wider">Récapitulatif</div>
-        <div className="flex flex-col gap-2 text-sm">
-          {[
-            { label: "CA encaissé (TTC)", val: formatEur(ca), color: "text-white" },
-            { label: "CA hors taxes (HT)", val: formatEur(calc.caHT), color: "text-white/70" },
-            { label: "— TVA DGFiP (20%)", val: `- ${formatEur(calc.tva)}`, color: "text-red-400" },
-            { label: "— URSSAF BNC (26.1% HT)", val: `- ${formatEur(calc.urssaf)}`, color: "text-red-400" },
-            { label: "— Formation pro CFP (0.2% HT)", val: `- ${formatEur(calc.cfp)}`, color: "text-red-400" },
-            { label: "— Impôt sur le revenu", val: `- ${formatEur(calc.ir)}`, color: "text-red-400" },
-          ].map(({ label, val, color }) => (
-            <div key={label} className="flex justify-between items-center">
-              <span className="text-white/50">{label}</span>
-              <span className={`font-semibold ${color}`}>{val}</span>
+            {/* Barre de répartition */}
+            <div className="flex flex-col gap-2">
+              <div className="text-xs text-white/40 font-medium uppercase tracking-wider">Répartition du CA</div>
+              <div className="flex h-3 rounded-full overflow-hidden gap-px">
+                <div className="bg-red-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.tva / ca) * 100}%` : "0%" }} />
+                <div className="bg-orange-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.urssaf / ca) * 100}%` : "0%" }} />
+                <div className="bg-yellow-500/80 transition-all duration-300" style={{ width: ca > 0 ? `${(calc.ir / ca) * 100}%` : "0%" }} />
+                <div className="bg-emerald-500/80 transition-all duration-300 flex-1 min-w-0" />
+              </div>
+              <div className="flex flex-wrap gap-3 text-xs text-white/40">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500/80 inline-block" />TVA</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-orange-500/80 inline-block" />URSSAF</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-yellow-500/80 inline-block" />Impôt</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-500/80 inline-block" />Net</span>
+              </div>
             </div>
-          ))}
-          <div className="border-t border-white/10 mt-1 pt-3 flex justify-between items-center">
-            <span className="font-bold text-emerald-300">= Net à te virer</span>
-            <span className="text-xl font-black text-emerald-400">{formatEur(calc.net)}</span>
+          </div>
+
+          {/* Cards */}
+          <div className="grid grid-cols-2 gap-3">
+            <StatCard label="TVA à rendre" value={`- ${formatEur(calc.tva)}`} sub="à la DGFiP • taux 20%" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
+            <StatCard label="URSSAF" value={`- ${formatEur(calc.urssaf)}`} sub="BNC • taux 26.1%" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
+            <StatCard label="Formation pro (CFP)" value={`- ${formatEur(calc.cfp)}`} sub="taux 0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
+            <StatCard label="Impôt sur le revenu" value={`- ${formatEur(calc.ir)}`} sub={`Taux effectif ${formatPct(calc.tauxIREffectif)}`} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
+            <StatCard label="Net disponible" value={formatEur(calc.net)} sub={`${netPct.toFixed(0)}% de ton CA TTC`} color="bg-emerald-500" icon="💸" valueColor="text-emerald-400" />
+          </div>
+
+          {/* Récap final */}
+          <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 flex flex-col gap-3">
+            <div className="text-sm font-medium text-indigo-300 uppercase tracking-wider">Récapitulatif</div>
+            <div className="flex flex-col gap-2 text-sm">
+              {[
+                { label: "CA encaissé (TTC)", val: formatEur(ca), color: "text-white" },
+                { label: "CA hors taxes (HT)", val: formatEur(calc.caHT), color: "text-white/70" },
+                { label: "— TVA DGFiP (20%)", val: `- ${formatEur(calc.tva)}`, color: "text-red-400" },
+                { label: "— URSSAF BNC (26.1% HT)", val: `- ${formatEur(calc.urssaf)}`, color: "text-red-400" },
+                { label: "— Formation pro CFP (0.2% HT)", val: `- ${formatEur(calc.cfp)}`, color: "text-red-400" },
+                { label: "— Impôt sur le revenu", val: `- ${formatEur(calc.ir)}`, color: "text-red-400" },
+              ].map(({ label, val, color }) => (
+                <div key={label} className="flex justify-between items-center">
+                  <span className="text-white/50">{label}</span>
+                  <span className={`font-semibold ${color}`}>{val}</span>
+                </div>
+              ))}
+              <div className="border-t border-white/10 mt-1 pt-3 flex justify-between items-center">
+                <span className="font-bold text-emerald-300">= Net à te virer</span>
+                <span className="text-xl font-black text-emerald-400">{formatEur(calc.net)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Tranches IR */}
+          <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
+            <div className="text-sm font-medium text-white/50 uppercase tracking-wider">Tranches d&apos;imposition</div>
+            <div className="flex flex-col gap-1">
+              {IR_TRANCHES.map((t, i) => {
+                const prev = i === 0 ? 0 : IR_TRANCHES[i - 1].max;
+                const isActive = calc.revenuImposable > prev;
+                return (
+                  <div key={i} className={`flex items-center justify-between text-sm rounded-lg px-3 py-2 transition-all ${isActive ? "bg-white/5 text-white" : "text-white/20"}`}>
+                    <span>
+                      {i === IR_TRANCHES.length - 1
+                        ? `> ${new Intl.NumberFormat("fr-FR").format(prev)} €`
+                        : `${new Intl.NumberFormat("fr-FR").format(prev)} – ${new Intl.NumberFormat("fr-FR").format(t.max)} €`}
+                    </span>
+                    <span className={`font-bold ${isActive ? "text-yellow-400" : ""}`}>{(t.rate * 100).toFixed(0)} %</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-white/5 pt-3 flex justify-between text-sm">
+              <span className="text-white/50">Revenu imposable (après URSSAF)</span>
+              <span className="font-semibold">{formatEur(calc.revenuImposable)}</span>
+            </div>
+          </div>
+
+          <div className="text-center text-xs text-white/20 pb-2">
+            Calculs basés sur les taux 2025 • Non contractuel
           </div>
         </div>
-      </div>
 
-      {/* Gmail — Factures Shine uniquement */}
-      <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
+        {/* Colonne droite — Graphes + Factures */}
+        <div className="w-full flex flex-col gap-5 min-w-0">
+          <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
+          <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
+        </div>
 
-      <div className="text-center text-xs text-white/20 pb-4">
-        Calculs basés sur les taux 2025 • Non contractuel
       </div>
     </main>
   );
