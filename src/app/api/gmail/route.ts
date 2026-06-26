@@ -130,14 +130,31 @@ export async function GET(req: Request) {
     })
   );
 
-  // Garde uniquement les factures Shine dont le sujet correspond au pattern
-  // "Facture <Mois> <Année> de FICHANT MAVRICK" ou "de MONSIEUR MAVRICK FICHANT"
-  const factureShinePattern = /Facture\s+\w+\s+\d{4}\s+de\s+(FICHANT\s+MAVRICK|MONSIEUR\s+MAVRICK\s+FICHANT)/i;
+  const factureShinePattern = /Facture\s+(\w+)\s+(\d{4})\s+de\s+(FICHANT\s+MAVRICK|MONSIEUR\s+MAVRICK\s+FICHANT)/i;
 
-  const facturesFiltrees = factures.filter((f) => {
-    if (!f.isShine) return false;
-    return factureShinePattern.test(f.sujet);
-  });
+  const MOIS_FR: Record<string, number> = {
+    janvier: 0, février: 1, fevrier: 1, mars: 2, avril: 3, mai: 4, juin: 5,
+    juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
+  };
+
+  // 45 jours fin de mois : on ajoute 45j à la date d'émission puis on va à la fin du mois résultant
+  function dateEncaissement(moisNom: string, annee: number): string {
+    const moisIdx = MOIS_FR[moisNom.toLowerCase()];
+    if (moisIdx === undefined) return "";
+    const emission = new Date(annee, moisIdx, 1);
+    emission.setDate(emission.getDate() + 45);
+    // Fin du mois résultant
+    const finMois = new Date(emission.getFullYear(), emission.getMonth() + 1, 0);
+    return finMois.toISOString().split("T")[0];
+  }
+
+  const facturesFiltrees = factures
+    .filter((f) => f.isShine && factureShinePattern.test(f.sujet))
+    .map((f) => {
+      const m = f.sujet.match(factureShinePattern);
+      const encaissement = m ? dateEncaissement(m[1], parseInt(m[2])) : "";
+      return { ...f, dateEncaissement: encaissement };
+    });
 
   facturesFiltrees.sort((a, b) =>
     new Date(b.date).getTime() - new Date(a.date).getTime()

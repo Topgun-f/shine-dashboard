@@ -67,6 +67,7 @@ interface Facture {
   snippet: string;
   isShine: boolean;
   attachments: { nom: string; attachmentId: string; messageId: string }[];
+  dateEncaissement?: string;
 }
 
 const PERIODES = [
@@ -549,8 +550,13 @@ function GmailSection({
                   <div className="flex flex-col gap-0.5 min-w-0 flex-1">
                     <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
                     <div className="text-xs text-white/20">
-                      {new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                      Émise le {new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
                     </div>
+                    {f.dateEncaissement && (
+                      <div className="text-xs text-amber-400/70">
+                        Encaissement prévu : {new Date(f.dateEncaissement).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                      </div>
+                    )}
                     {(f.attachments?.length ?? 0) > 0 && (
                       <div className="flex flex-wrap gap-1 mt-1">
                         {f.attachments.map((a) => (
