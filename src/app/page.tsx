@@ -384,7 +384,7 @@ function GmailSection({ onInjectCA }: { onInjectCA: (montant: number) => void })
   );
 }
 
-const TAUX_IR_FIXE = 0.241; // taux effectif réel à 154k CA/an
+const TAUX_IR_FIXE = 0.24;
 
 export default function Home() {
   const [ca, setCa] = useState<number>(154000);
@@ -412,11 +412,7 @@ export default function Home() {
     const urssaf = caHT * URSSAF_RATE;
     const cfp = caHT * CFP_RATE;
     const revenuImposable = caHT - urssaf - cfp;
-    // En mode facture unique : taux effectif annuel fixe (24.1%)
-    // En mode annuel : calcul par tranches réel
-    const ir = modeFacture
-      ? revenuImposable * TAUX_IR_FIXE
-      : computeIR(revenuImposable);
+    const ir = revenuImposable * TAUX_IR_FIXE;
     const net = revenuImposable - ir;
     const tauxIREffectif = revenuImposable > 0 ? ir / revenuImposable : 0;
     return { tva, caHT, urssaf, cfp, revenuImposable, ir, net, tauxIREffectif };
@@ -475,7 +471,7 @@ export default function Home() {
           {modeFacture && (
             <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2 mt-1">
               <span className="text-xs text-emerald-300 flex items-center gap-2">
-                📎 Mode facture — IR à taux effectif fixe 24.1%
+                📎 Mode facture — IR à taux effectif fixe 24%
               </span>
               <button onClick={handleResetCA} className="text-xs text-white/30 hover:text-white/60 transition-all">
                 ✕ Réinitialiser
