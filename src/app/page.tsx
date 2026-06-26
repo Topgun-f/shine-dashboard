@@ -807,28 +807,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Tranches IR compactes */}
-            <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-1">
-              <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-1">Tranches IR</div>
-              {IR_TRANCHES.map((t, i) => {
-                const prev = i === 0 ? 0 : IR_TRANCHES[i - 1].max;
-                const isActive = calc.revenuImposable > prev;
-                return (
-                  <div key={i} className={`flex items-center justify-between text-xs rounded-lg px-2 py-1 transition-all ${isActive ? "bg-white/5 text-white" : "text-white/20"}`}>
-                    <span className="text-[10px]">
-                      {i === IR_TRANCHES.length - 1
-                        ? `> ${new Intl.NumberFormat("fr-FR").format(prev)} €`
-                        : `${new Intl.NumberFormat("fr-FR").format(prev)} – ${new Intl.NumberFormat("fr-FR").format(t.max)} €`}
-                    </span>
-                    <span className={`font-bold text-[10px] ${isActive ? "text-yellow-400" : ""}`}>{(t.rate * 100).toFixed(0)} %</span>
-                  </div>
-                );
-              })}
-              <div className="border-t border-white/5 mt-1 pt-2 flex justify-between text-[10px]">
-                <span className="text-white/30">Revenu imposable</span>
-                <span className="text-white/60 font-semibold">{formatEur(calc.revenuImposable)}</span>
-              </div>
-            </div>
           </div>
         </div>
 
