@@ -88,68 +88,68 @@ interface PointMois {
 
 function CACurve({ factures }: { factures: Facture[] }) {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const annee = new Date().getFullYear();
 
-  const points: PointMois[] = useMemo(() => {
-    const map = new Map<string, number>();
+  // 12 mois fixes Jan→Déc, CA mensuel puis cumulatif
+  const points = useMemo(() => {
+    const mensuel = Array(12).fill(0);
     for (const f of factures) {
-      if (!f.isShine || !f.montant) continue;
+      if (!f.montant) continue;
       const d = new Date(f.date);
-      if (isNaN(d.getTime())) continue;
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      map.set(key, (map.get(key) ?? 0) + f.montant);
+      if (isNaN(d.getTime()) || d.getFullYear() !== annee) continue;
+      mensuel[d.getMonth()] += f.montant;
     }
-    return Array.from(map.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([key, ca]) => {
-        const [year, month] = key.split("-").map(Number);
-        return {
-          key,
-          nomCourt: MOIS_NOMS_COURT[month - 1],
-          nomLong: `${MOIS_NOMS_LONG[month - 1]} ${year}`,
-          ca,
-        };
-      });
-  }, [factures]);
+    let cumul = 0;
+    return mensuel.map((ca, i) => {
+      cumul += ca;
+      return {
+        moisIdx: i,
+        nomCourt: MOIS_NOMS_COURT[i],
+        nomLong: `${MOIS_NOMS_LONG[i]} ${annee}`,
+        ca,
+        cumul,
+        hasData: ca > 0,
+      };
+    });
+  }, [factures, annee]);
 
-  if (points.length === 0) {
-    return (
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 text-sm text-white/30 text-center py-8">
-        Aucune facture Shine avec montant détecté
-      </div>
-    );
-  }
+  const maxCumul = Math.max(...points.map((p) => p.cumul), 1);
+  const totalCA = points[11].cumul;
+  const moisActuel = new Date().getMonth();
 
-  const maxCA = Math.max(...points.map((p) => p.ca));
-  const n = points.length;
   const W = 560;
-  const H = 180;
-  const PAD = { top: 16, right: 16, bottom: 36, left: 60 };
+  const H = 200;
+  const PAD = { top: 16, right: 16, bottom: 36, left: 64 };
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
-  const xScale = (i: number) => PAD.left + (i / (n - 1 || 1)) * innerW;
-  const yScale = (v: number) => PAD.top + innerH - (v / (maxCA || 1)) * innerH;
+  const xScale = (i: number) => PAD.left + (i / 11) * innerW;
+  const yScale = (v: number) => PAD.top + innerH - (v / maxCumul) * innerH;
 
-  const pathCA = points
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.ca)}`)
+  // Courbe cumulative uniquement sur les mois avec données (jusqu'au mois actuel)
+  const pathCumul = points
+    .slice(0, moisActuel + 1)
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)} ${yScale(p.cumul)}`)
     .join(" ");
 
-  const areaCA =
-    pathCA +
-    ` L ${xScale(n - 1)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`;
+  const areaCumul = points.slice(0, moisActuel + 1).length > 0
+    ? pathCumul + ` L ${xScale(moisActuel)} ${yScale(0)} L ${xScale(0)} ${yScale(0)} Z`
+    : "";
 
   const hovered = hoverIdx !== null ? points[hoverIdx] : null;
-  const totalCA = points.reduce((s, p) => s + p.ca, 0);
 
   return (
     <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA Shine — {points[0]?.nomLong} → {points[n - 1]?.nomLong}</div>
+        <div className="text-sm font-medium text-white/50 uppercase tracking-wider">CA cumulé {annee}</div>
         <div className="flex flex-col items-end gap-0.5">
           {hovered ? (
-            <span className="text-xs text-white/40">{hovered.nomLong} <span className="font-bold text-white">{formatEur(hovered.ca)}</span></span>
+            <>
+              <span className="text-xs text-white/40">{hovered.nomLong} — mensuel <span className="font-bold text-indigo-300">{formatEur(hovered.ca)}</span></span>
+              <span className="text-xs text-white/40">Cumulé <span className="font-bold text-white">{formatEur(hovered.cumul)}</span></span>
+            </>
           ) : (
-            <span className="text-xs text-white/40">Total <span className="font-bold text-white">{formatEur(totalCA)}</span></span>
+            <span className="text-xs text-white/40">Total encaissé <span className="font-bold text-white">{formatEur(totalCA)}</span></span>
           )}
         </div>
       </div>
@@ -161,79 +161,105 @@ function CACurve({ factures }: { factures: Facture[] }) {
         onMouseLeave={() => setHoverIdx(null)}
       >
         <defs>
-          <linearGradient id="caGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.30" />
+          <linearGradient id="cumulGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.25" />
             <stop offset="100%" stopColor="#6366f1" stopOpacity="0.02" />
           </linearGradient>
         </defs>
 
         {/* Grille horizontale */}
         {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-          const y = yScale(maxCA * t);
+          const y = yScale(maxCumul * t);
           return (
             <g key={t}>
               <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-              <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.25)">
-                {formatEur(maxCA * t)}
+              <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">
+                {formatEur(maxCumul * t)}
               </text>
             </g>
           );
         })}
 
-        {/* Aire CA */}
-        <path d={areaCA} fill="url(#caGrad)" />
+        {/* Séparateur mois actuel / futur */}
+        <line
+          x1={xScale(moisActuel)} x2={xScale(moisActuel)}
+          y1={PAD.top} y2={PAD.top + innerH}
+          stroke="rgba(255,255,255,0.08)" strokeWidth={1} strokeDasharray="3 3"
+        />
 
-        {/* Ligne CA */}
-        <path d={pathCA} fill="none" stroke="rgba(99,102,241,0.9)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        {/* Aire cumul */}
+        {areaCumul && <path d={areaCumul} fill="url(#cumulGrad)" />}
+
+        {/* Ligne cumulative */}
+        {pathCumul && (
+          <path d={pathCumul} fill="none" stroke="rgba(99,102,241,0.9)" strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+        )}
+
+        {/* Barres mensuelles (mini) pour les mois avec CA */}
+        {points.map((p, i) => {
+          if (!p.hasData) return null;
+          const bw = 6;
+          const bh = Math.max(2, (p.ca / maxCumul) * innerH * 0.3);
+          return (
+            <rect
+              key={`bar-${i}`}
+              x={xScale(i) - bw / 2}
+              y={PAD.top + innerH - bh}
+              width={bw}
+              height={bh}
+              rx={2}
+              fill={hoverIdx === i ? "#818cf8" : "rgba(99,102,241,0.35)"}
+            />
+          );
+        })}
 
         {/* Labels mois axe X */}
         {points.map((p, i) => (
-          <text key={i} x={xScale(i)} y={H - 8} textAnchor="middle" fontSize={9} fill="rgba(255,255,255,0.30)">
+          <text
+            key={i}
+            x={xScale(i)} y={H - 8}
+            textAnchor="middle" fontSize={9}
+            fill={i === moisActuel ? "rgba(255,255,255,0.6)" : p.hasData ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.18)"}
+            fontWeight={i === moisActuel ? "bold" : "normal"}
+          >
             {p.nomCourt}
           </text>
         ))}
 
-        {/* Points */}
-        {points.map((p, i) => (
-          <circle
-            key={i}
-            cx={xScale(i)} cy={yScale(p.ca)}
-            r={hoverIdx === i ? 6 : 3}
-            fill={hoverIdx === i ? "#6366f1" : "rgba(99,102,241,0.9)"}
-            stroke={hoverIdx === i ? "white" : "none"}
-            strokeWidth={1.5}
-          />
+        {/* Points sur courbe cumulative */}
+        {points.slice(0, moisActuel + 1).map((p, i) => (
+          p.cumul > 0 && (
+            <circle
+              key={`pt-${i}`}
+              cx={xScale(i)} cy={yScale(p.cumul)}
+              r={hoverIdx === i ? 6 : p.hasData ? 4 : 2}
+              fill={hoverIdx === i ? "#818cf8" : p.hasData ? "rgba(99,102,241,0.9)" : "rgba(99,102,241,0.3)"}
+              stroke={hoverIdx === i ? "white" : "none"}
+              strokeWidth={1.5}
+            />
+          )
         ))}
 
-        {/* Ligne verticale hover */}
-        {hoverIdx !== null && (
-          <line
-            x1={xScale(hoverIdx)} x2={xScale(hoverIdx)}
-            y1={PAD.top} y2={PAD.top + innerH}
-            stroke="rgba(255,255,255,0.2)" strokeWidth={1} strokeDasharray="4 3"
+        {/* Zones hover invisibles — toute la hauteur, tous les mois */}
+        {points.map((_, i) => (
+          <rect
+            key={`hover-${i}`}
+            x={xScale(i) - innerW / 22}
+            y={PAD.top}
+            width={innerW / 11}
+            height={innerH}
+            fill="transparent"
+            onMouseEnter={() => setHoverIdx(i)}
           />
-        )}
-
-        {/* Zones hover invisibles */}
-        {points.map((_, i) => {
-          const slotW = n > 1 ? innerW / (n - 1) : innerW;
-          return (
-            <rect
-              key={`hover-${i}`}
-              x={xScale(i) - slotW / 2}
-              y={PAD.top}
-              width={slotW}
-              height={innerH}
-              fill="transparent"
-              onMouseEnter={() => setHoverIdx(i)}
-            />
-          );
-        })}
+        ))}
       </svg>
 
       <div className="flex gap-4 text-xs text-white/40">
         <span className="flex items-center gap-1.5">
-          <span className="w-3 h-0.5 bg-indigo-400 inline-block rounded" />CA mensuel Shine (TTC)
+          <span className="w-3 h-0.5 bg-indigo-400 inline-block rounded" />CA cumulé (TTC)
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="w-2 h-2 rounded-sm bg-indigo-500/40 inline-block" />CA mensuel
         </span>
       </div>
     </div>
@@ -261,32 +287,47 @@ function GmailSection({
 
   const shineFactures = useMemo(() => factures.filter((f) => f.isShine), [factures]);
 
+  const getMontantFacture = (f: Facture): number | null => {
+    return pdfResults[f.id!]?.montant ?? f.montant ?? null;
+  };
+
+  const recalcCA = (selected: Set<string>, results: typeof pdfResults) => {
+    const total = shineFactures
+      .filter((f) => selected.has(f.id!))
+      .reduce((sum, f) => {
+        const m = results[f.id!]?.montant ?? f.montant ?? 0;
+        return sum + m;
+      }, 0);
+    if (total > 0) onInjectCA(total);
+  };
+
   const toggleSelect = async (facture: Facture) => {
     const newSelected = new Set(selectedIds);
     if (newSelected.has(facture.id!)) {
       newSelected.delete(facture.id!);
     } else {
       newSelected.add(facture.id!);
+      // Charger le PDF si pas encore fait
       if (!pdfResults[facture.id!] && (facture.attachments?.length ?? 0) > 0) {
         setPdfLoading(facture.id!);
         try {
           const att = facture.attachments[0];
           const res = await fetch(`/api/gmail/attachment?messageId=${att.messageId}&attachmentId=${att.attachmentId}`);
           const data = await res.json();
-          setPdfResults((prev) => ({ ...prev, [facture.id!]: data }));
-          if (data.montant) onInjectCA(data.montant);
+          const newResults = { ...pdfResults, [facture.id!]: data };
+          setPdfResults(newResults);
+          setSelectedIds(newSelected);
+          recalcCA(newSelected, newResults);
+          return;
         } catch {
           // silence
         } finally {
           setPdfLoading(null);
         }
-      } else if (pdfResults[facture.id!]?.montant) {
-        onInjectCA(pdfResults[facture.id!].montant!);
-      } else if (facture.montant) {
-        onInjectCA(facture.montant);
       }
     }
     setSelectedIds(newSelected);
+    recalcCA(newSelected, pdfResults);
   };
 
   const fetchFactures = useCallback(async () => {
@@ -445,15 +486,31 @@ function GmailSection({
           <div className="flex items-center justify-between text-sm border-b border-white/5 pb-3">
             <span className="text-white/50">{shineFactures.length} facture{shineFactures.length > 1 ? "s" : ""} Shine</span>
             {totalShine > 0 && (
-              <span className="font-bold text-emerald-400">{formatEur(totalShine)} total</span>
+              <span className="font-bold text-white/50">{formatEur(totalShine)} total</span>
             )}
           </div>
+
+          {/* Bandeau sélection multiple */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
+              <span className="text-xs text-emerald-300">
+                {selectedIds.size} facture{selectedIds.size > 1 ? "s" : ""} sélectionnée{selectedIds.size > 1 ? "s" : ""} —
+                estimation sur <span className="font-bold">{formatEur(shineFactures.filter((f) => selectedIds.has(f.id!)).reduce((s, f) => s + (getMontantFacture(f) ?? 0), 0))}</span>
+              </span>
+              <button
+                onClick={() => { setSelectedIds(new Set()); onInjectCA(0); }}
+                className="text-xs text-white/30 hover:text-white/60 transition-all"
+              >
+                ✕ Tout désélectionner
+              </button>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2 max-h-96 overflow-y-auto pr-1">
             {shineFactures.map((f) => {
               const isSelected = selectedIds.has(f.id!);
               const isLoadingPdf = pdfLoading === f.id;
-              const pdfResult = pdfResults[f.id!];
-              const montantAffiche = pdfResult?.montant ?? f.montant;
+              const montantAffiche = getMontantFacture(f);
 
               return (
                 <div
@@ -486,19 +543,6 @@ function GmailSection({
                           <span key={a.attachmentId} className="text-xs bg-white/5 border border-white/10 rounded px-2 py-0.5 text-white/40 flex items-center gap-1">
                             📎 {a.nom}
                           </span>
-                        ))}
-                      </div>
-                    )}
-                    {pdfResult && pdfResult.tous.length > 1 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {pdfResult.tous.map((m) => (
-                          <button
-                            key={m}
-                            onClick={(e) => { e.stopPropagation(); onInjectCA(m); }}
-                            className={`text-xs rounded px-2 py-0.5 border transition-all ${m === pdfResult.montant ? "bg-emerald-500/20 border-emerald-500/30 text-emerald-300" : "bg-white/5 border-white/10 text-white/40 hover:bg-white/10"}`}
-                          >
-                            {formatEur(m)}
-                          </button>
                         ))}
                       </div>
                     )}
