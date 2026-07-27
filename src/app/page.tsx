@@ -723,7 +723,14 @@ export default function Home() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(URSSAF_DECLARATIONS_KEY);
-      if (raw) setDeclarationsFaites(new Set(JSON.parse(raw)));
+      if (raw) {
+        setDeclarationsFaites(new Set(JSON.parse(raw)));
+      } else {
+        // CA d'avril 2026 déjà déclaré sur l'URSSAF avant la mise en place de ce suivi
+        const defaut = new Set([cleDeclaration(3, 2026)]);
+        setDeclarationsFaites(defaut);
+        localStorage.setItem(URSSAF_DECLARATIONS_KEY, JSON.stringify([...defaut]));
+      }
     } catch {
       // silence
     }
