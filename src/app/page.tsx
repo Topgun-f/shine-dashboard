@@ -97,6 +97,16 @@ function moisADeclarerUrssaf(ref: Date = new Date()): { moisIdx: number; annee: 
   return { moisIdx: d.getMonth(), annee: d.getFullYear() };
 }
 
+function cleDeclaration(moisIdx: number, annee: number): string {
+  return `${annee}-${String(moisIdx + 1).padStart(2, "0")}`;
+}
+
+// Échéance = dernier jour du mois de saisie (mois de déclaration courant).
+// Ne gère pas les rares décalages jours fériés/week-end du calendrier URSSAF officiel.
+function echeanceUrssaf(ref: Date = new Date()): Date {
+  return new Date(ref.getFullYear(), ref.getMonth() + 1, 0);
+}
+
 function extractMoisFacture(sujet: string): { moisIdx: number; annee: number } | null {
   const m = sujet.match(/Facture\s+(\w+)\s+(\d{4})/i);
   if (!m) return null;
@@ -700,12 +710,38 @@ function GmailSection({
   );
 }
 
+const URSSAF_DECLARATIONS_KEY = "shine-urssaf-declarations-faites";
+
 export default function Home() {
   const [ca, setCa] = useState<number>(154000);
   const [input, setInput] = useState("154000");
   const [modeFacture, setModeFacture] = useState(false);
   const [shineFactures, setShineFactures] = useState<Facture[]>([]);
   const [shinePdfResults, setShinePdfResults] = useState<Record<string, { montant: number | null }>>({});
+  const [declarationsFaites, setDeclarationsFaites] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(URSSAF_DECLARATIONS_KEY);
+      if (raw) setDeclarationsFaites(new Set(JSON.parse(raw)));
+    } catch {
+      // silence
+    }
+  }, []);
+
+  const toggleDeclarationFaite = (cle: string) => {
+    setDeclarationsFaites((prev) => {
+      const next = new Set(prev);
+      if (next.has(cle)) next.delete(cle);
+      else next.add(cle);
+      try {
+        localStorage.setItem(URSSAF_DECLARATIONS_KEY, JSON.stringify([...next]));
+      } catch {
+        // silence
+      }
+      return next;
+    });
+  };
 
   const handleInjectCA = (montant: number) => {
     setInput(String(montant));
@@ -729,6 +765,18 @@ export default function Home() {
 
   const netPct = ca > 0 ? (calc.net / ca) * 100 : 0;
   const declarationUrssaf = useMemo(() => moisADeclarerUrssaf(), []);
+  const cleDeclarationCourante = cleDeclaration(declarationUrssaf.moisIdx, declarationUrssaf.annee);
+  const declarationCouranteFaite = declarationsFaites.has(cleDeclarationCourante);
+
+  const prochaineEcheance = useMemo(() => {
+    const echeanceActuelle = echeanceUrssaf();
+    const d = new Date(echeanceActuelle.getFullYear(), echeanceActuelle.getMonth() + 1, 1);
+    return echeanceUrssaf(d);
+  }, []);
+  const moisADeclarerProchain = useMemo(() => {
+    const d = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1);
+    return moisADeclarerUrssaf(d);
+  }, []);
 
   const factureADeclarer = useMemo(() => {
     return shineFactures.find((f) => {
@@ -760,17 +808,44 @@ export default function Home() {
         {/* Bannière déclaration URSSAF */}
         <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 flex items-center gap-3">
           <span className="text-lg shrink-0">ℹ️</span>
+          <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={declarationCouranteFaite}
+              onChange={() => toggleDeclarationFaite(cleDeclarationCourante)}
+              className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+            />
+          </label>
           <span className="text-sm text-emerald-200">
-            Saisir URSSAF : CA de{" "}
-            <strong className="text-emerald-100">
-              {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
-            </strong>
-            {montantHTaDeclarer !== null && (
+            {declarationCouranteFaite ? (
               <>
-                {" "}— <strong className="text-emerald-100">{formatEur(montantHTaDeclarer)} HT</strong>
+                <span className="line-through text-emerald-400/50">
+                  Saisir URSSAF : CA de {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
+                </span>
+                {" "}✅ — Prochaine échéance :{" "}
+                <strong className="text-emerald-100">
+                  {MOIS_NOMS_LONG[moisADeclarerProchain.moisIdx]} {moisADeclarerProchain.annee}
+                </strong>
+                {" "}à saisir avant le{" "}
+                <strong className="text-emerald-100">
+                  {prochaineEcheance.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                </strong>
+              </>
+            ) : (
+              <>
+                Saisir URSSAF : CA de{" "}
+                <strong className="text-emerald-100">
+                  {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
+                </strong>
+                {montantHTaDeclarer !== null && (
+                  <>
+                    {" "}— <strong className="text-emerald-100">{formatEur(montantHTaDeclarer)} HT</strong>
+                  </>
+                )}
+                {" "}(déclaration mois -2, avant le{" "}
+                {echeanceUrssaf().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })})
               </>
             )}
-            {" "}(déclaration mois -2).
           </span>
         </div>
 
