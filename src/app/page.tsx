@@ -730,6 +730,19 @@ export default function Home() {
   const netPct = ca > 0 ? (calc.net / ca) * 100 : 0;
   const declarationUrssaf = useMemo(() => moisADeclarerUrssaf(), []);
 
+  const factureADeclarer = useMemo(() => {
+    return shineFactures.find((f) => {
+      const info = extractMoisFacture(f.sujet);
+      return info && info.moisIdx === declarationUrssaf.moisIdx && info.annee === declarationUrssaf.annee;
+    });
+  }, [shineFactures, declarationUrssaf]);
+
+  const montantHTaDeclarer = useMemo(() => {
+    if (!factureADeclarer) return null;
+    const montantTTC = shinePdfResults[factureADeclarer.id!]?.montant ?? factureADeclarer.montant;
+    return montantTTC ? montantTTC / (1 + TVA_RATE) : null;
+  }, [factureADeclarer, shinePdfResults]);
+
   return (
     <main className="min-h-screen bg-[#080810] text-white">
       {/* Top bar */}
@@ -745,14 +758,19 @@ export default function Home() {
       <div className="px-6 py-5 flex flex-col gap-5 max-w-screen-2xl mx-auto">
 
         {/* Bannière déclaration URSSAF */}
-        <div className="rounded-2xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 flex items-center gap-3">
-          <span className="text-lg shrink-0">⚠️</span>
-          <span className="text-sm text-orange-200">
-            Attention, il faut saisir sur l&apos;URSSAF le CA de{" "}
-            <strong className="text-orange-100">
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 flex items-center gap-3">
+          <span className="text-lg shrink-0">ℹ️</span>
+          <span className="text-sm text-emerald-200">
+            Saisir URSSAF : CA de{" "}
+            <strong className="text-emerald-100">
               {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
-            </strong>{" "}
-            (déclaration mois -2).
+            </strong>
+            {montantHTaDeclarer !== null && (
+              <>
+                {" "}— <strong className="text-emerald-100">{formatEur(montantHTaDeclarer)} HT</strong>
+              </>
+            )}
+            {" "}(déclaration mois -2).
           </span>
         </div>
 
