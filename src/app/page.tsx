@@ -91,6 +91,12 @@ function moisEncaissement(moisFactureIdx: number, anneeFacture: number): { mois:
   return { mois: d.getMonth(), annee: d.getFullYear() };
 }
 
+// Déclaration URSSAF BNC : le CA à déclarer ce mois-ci est celui du mois -2
+function moisADeclarerUrssaf(ref: Date = new Date()): { moisIdx: number; annee: number } {
+  const d = new Date(ref.getFullYear(), ref.getMonth() - 2, 1);
+  return { moisIdx: d.getMonth(), annee: d.getFullYear() };
+}
+
 function extractMoisFacture(sujet: string): { moisIdx: number; annee: number } | null {
   const m = sujet.match(/Facture\s+(\w+)\s+(\d{4})/i);
   if (!m) return null;
@@ -652,6 +658,29 @@ function GmailSection({
                 </div>
               );
             })}
+            {(() => {
+              const declaration = moisADeclarerUrssaf();
+              const factureADeclarer = shineFactures.find((f) => {
+                if (!selectedIds.has(f.id!)) return false;
+                const info = extractMoisFacture(f.sujet);
+                return info && info.moisIdx === declaration.moisIdx && info.annee === declaration.annee;
+              });
+              if (!factureADeclarer) return null;
+              const montantTTC = getMontantFacture(factureADeclarer);
+              if (montantTTC === null) return null;
+              const montantHT = montantTTC / (1 + TVA_RATE);
+              return (
+                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 flex flex-col gap-1 mt-1">
+                  <div className="text-[10px] text-emerald-300 font-semibold uppercase tracking-widest">
+                    CA à renseigner dans la déclaration URSSAF BNC — {MOIS_NOMS_LONG[declaration.moisIdx]} {declaration.annee}
+                  </div>
+                  <div className="text-2xl font-black text-emerald-400">{formatEur(montantHT)}</div>
+                  <div className="text-xs text-white/40">
+                    Montant HT (CA TTC {formatEur(montantTTC)} — seul le HT doit être saisi sur l&apos;URSSAF)
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </>
       )}
@@ -699,6 +728,7 @@ export default function Home() {
   };
 
   const netPct = ca > 0 ? (calc.net / ca) * 100 : 0;
+  const declarationUrssaf = useMemo(() => moisADeclarerUrssaf(), []);
 
   return (
     <main className="min-h-screen bg-[#080810] text-white">
@@ -713,6 +743,18 @@ export default function Home() {
       </div>
 
       <div className="px-6 py-5 flex flex-col gap-5 max-w-screen-2xl mx-auto">
+
+        {/* Bannière déclaration URSSAF */}
+        <div className="rounded-2xl border border-orange-500/30 bg-orange-500/10 px-4 py-3 flex items-center gap-3">
+          <span className="text-lg shrink-0">⚠️</span>
+          <span className="text-sm text-orange-200">
+            Attention, il faut saisir sur l&apos;URSSAF le CA de{" "}
+            <strong className="text-orange-100">
+              {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
+            </strong>{" "}
+            (déclaration mois -2).
+          </span>
+        </div>
 
         {/* Ligne 1 : KPIs + saisie CA */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
