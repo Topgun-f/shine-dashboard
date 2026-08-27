@@ -137,12 +137,21 @@ export async function GET(req: Request) {
     juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
   };
 
-  // Encaissement = mois facture + 2 mois (mars → mai, avril → juin, etc.)
+  // Encaissement = 45 jours fin de mois : le paiement tombe le 30 du mois de
+  // facturation + 2 (mars → 30 mai, avril → 30 juin, etc.).
   function dateEncaissement(moisNom: string, annee: number): string {
     const moisIdx = MOIS_FR[moisNom.toLowerCase()];
     if (moisIdx === undefined) return "";
-    const d = new Date(annee, moisIdx + 2, 1);
-    return d.toISOString().split("T")[0];
+    const cible = new Date(annee, moisIdx + 2, 1);
+    const an = cible.getFullYear();
+    const mois = cible.getMonth();
+    // Février n'a pas de 30 : on retombe sur son dernier jour plutôt que de
+    // déborder sur le mois suivant — new Date(annee, 1, 30) donnerait le 2 mars.
+    const jour = Math.min(30, new Date(an, mois + 1, 0).getDate());
+    // Chaîne assemblée à la main : toISOString() repasse en UTC et reculerait
+    // la date d'un jour dès que le serveur est sur un fuseau positif (Paris
+    // l'été), ce qui affichait un 29 pour un 30.
+    return `${an}-${String(mois + 1).padStart(2, "0")}-${String(jour).padStart(2, "0")}`;
   }
 
   const facturesFiltrees = factures
