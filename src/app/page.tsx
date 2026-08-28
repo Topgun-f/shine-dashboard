@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
 
 const TVA_RATE = 0.20;
-const URSSAF_RATE = 0.261;
+const URSSAF_RATE = 0.256;
 const CFP_RATE = 0.002;
 const TAUX_IR_FIXE = 0.24;
 
@@ -878,7 +878,7 @@ export default function Home() {
             {/* 4 charges en grille */}
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
               <StatCard label="TVA DGFiP" value={`- ${formatEur(calc.tva)}`} sub="20% du CA TTC" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
-              <StatCard label="URSSAF BNC" value={`- ${formatEur(calc.urssaf)}`} sub="26.1% du CA HT" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
+              <StatCard label="URSSAF BNC" value={`- ${formatEur(calc.urssaf)}`} sub="25.6% du CA HT" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
               <StatCard label="Impôt revenu" value={`- ${formatEur(calc.ir)}`} sub={`Taux fixe 24%`} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
               <StatCard label="Formation CFP" value={`- ${formatEur(calc.cfp)}`} sub="0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
             </div>
