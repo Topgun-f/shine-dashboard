@@ -130,7 +130,8 @@ export async function GET(req: Request) {
     })
   );
 
-  const factureShinePattern = /Facture\s+(\w+)\s+(\d{4})\s+de\s+(FICHANT\s+MAVRICK|MONSIEUR\s+MAVRICK\s+FICHANT)/i;
+  // \p{L} (plutôt que \w) pour matcher les mois accentués comme "Août" ou "Février".
+  const factureShinePattern = /Facture\s+(\p{L}+)\s+(\d{4})\s+de\s+(FICHANT\s+MAVRICK|MONSIEUR\s+MAVRICK\s+FICHANT)/iu;
 
   const MOIS_FR: Record<string, number> = {
     janvier: 0, février: 1, fevrier: 1, mars: 2, avril: 3, mai: 4, juin: 5,
