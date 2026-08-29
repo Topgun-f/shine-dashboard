@@ -356,6 +356,103 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
   );
 }
 
+function IRProvisionSection({
+  factures, pdfResults,
+}: {
+  factures: Facture[]; pdfResults: Record<string, { montant: number | null }>;
+}) {
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+
+  const moisData = useMemo(() => {
+    const map = new Map<string, { moisIdx: number; annee: number; montant: number; ir: number }>();
+    for (const f of factures) {
+      if (!f.isShine) continue;
+      const info = extractMoisFacture(f.sujet);
+      if (!info) continue;
+      const montant = pdfResults[f.id!]?.montant ?? f.montant;
+      if (!montant) continue;
+      const cle = cleDeclaration(info.moisIdx, info.annee);
+      map.set(cle, { moisIdx: info.moisIdx, annee: info.annee, montant, ir: computeCalc(montant).ir });
+    }
+    return [...map.entries()]
+      .map(([cle, v]) => ({ cle, ...v }))
+      .sort((a, b) => (b.annee * 12 + b.moisIdx) - (a.annee * 12 + a.moisIdx));
+  }, [factures, pdfResults]);
+
+  const toggle = (cle: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(cle)) next.delete(cle);
+      else next.add(cle);
+      return next;
+    });
+  };
+
+  const total = moisData.filter((m) => checked.has(m.cle)).reduce((s, m) => s + m.ir, 0);
+
+  if (moisData.length === 0) return null;
+
+  return (
+    <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="font-semibold text-sm">Provision impôt sur le revenu</div>
+          <div className="text-xs text-white/40">Coche les mois à cumuler — montant à garder sur Shine pour l&apos;IR</div>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            onClick={() => setChecked(new Set(moisData.map((m) => m.cle)))}
+            className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 hover:bg-white/10 transition-all"
+          >
+            Tout cocher
+          </button>
+          {checked.size > 0 && (
+            <button
+              onClick={() => setChecked(new Set())}
+              className="text-xs text-white/30 hover:text-white/60 transition-all"
+            >
+              ✕ Tout décocher
+            </button>
+          )}
+        </div>
+      </div>
+
+      {checked.size > 0 && (
+        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 flex items-center justify-between">
+          <span className="text-xs text-yellow-200">
+            {checked.size} mois sélectionné{checked.size > 1 ? "s" : ""}
+          </span>
+          <span className="text-2xl font-black text-yellow-400">{formatEur(total)}</span>
+        </div>
+      )}
+
+      <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1">
+        {moisData.map((m) => {
+          const isChecked = checked.has(m.cle);
+          return (
+            <label
+              key={m.cle}
+              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border cursor-pointer transition-all ${
+                isChecked ? "bg-yellow-500/10 border-yellow-500/30" : "bg-white/[0.02] border-white/10 hover:bg-white/5"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={isChecked}
+                onChange={() => toggle(m.cle)}
+                className="w-4 h-4 rounded accent-yellow-500 cursor-pointer shrink-0"
+              />
+              <span className="flex-1 text-sm">{MOIS_NOMS_LONG[m.moisIdx]} {m.annee}</span>
+              <span className="text-xs text-white/30 shrink-0">CA {formatEur(m.montant)}</span>
+              <span className="text-sm font-bold text-yellow-400 shrink-0">{formatEur(m.ir)}</span>
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function GmailSection({
   onInjectCA,
   onFacturesLoaded,
@@ -954,6 +1051,9 @@ export default function Home() {
 
         {/* Ligne 2 : Graphes */}
         <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
+
+        {/* Ligne 2bis : Provision impôt sur le revenu */}
+        <IRProvisionSection factures={shineFactures} pdfResults={shinePdfResults} />
 
         {/* Ligne 3 : Factures Gmail */}
         <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
