@@ -108,7 +108,7 @@ function echeanceUrssaf(ref: Date = new Date()): Date {
 }
 
 function extractMoisFacture(sujet: string): { moisIdx: number; annee: number } | null {
-  const m = sujet.match(/Facture\s+(\w+)\s+(\d{4})/i);
+  const m = sujet.match(/Facture\s+(\p{L}+)\s+(\d{4})/iu);
   if (!m) return null;
   const moisIdx = MOIS_FR_IDX[m[1].toLowerCase()];
   if (moisIdx === undefined) return null;
