@@ -97,8 +97,8 @@ function moisADeclarerUrssaf(ref: Date = new Date()): { moisIdx: number; annee: 
   return { moisIdx: d.getMonth(), annee: d.getFullYear() };
 }
 
-function cleDeclaration(moisIdx: number, annee: number): string {
-  return `${annee}-${String(moisIdx + 1).padStart(2, "0")}`;
+function cleDeclaration(moisIdx: number, annee: number, type: "urssaf" | "tva" = "urssaf"): string {
+  return `${type}-${annee}-${String(moisIdx + 1).padStart(2, "0")}`;
 }
 
 // Échéance = dernier jour du mois de saisie (mois de déclaration courant).
@@ -824,7 +824,7 @@ export default function Home() {
         setDeclarationsFaites(new Set(JSON.parse(raw)));
       } else {
         // CA d'avril 2026 déjà déclaré sur l'URSSAF avant la mise en place de ce suivi
-        const defaut = new Set([cleDeclaration(3, 2026)]);
+        const defaut = new Set([cleDeclaration(3, 2026, "urssaf")]);
         setDeclarationsFaites(defaut);
         localStorage.setItem(URSSAF_DECLARATIONS_KEY, JSON.stringify([...defaut]));
       }
@@ -869,8 +869,10 @@ export default function Home() {
 
   const netPct = ca > 0 ? (calc.net / ca) * 100 : 0;
   const declarationUrssaf = useMemo(() => moisADeclarerUrssaf(), []);
-  const cleDeclarationCourante = cleDeclaration(declarationUrssaf.moisIdx, declarationUrssaf.annee);
-  const declarationCouranteFaite = declarationsFaites.has(cleDeclarationCourante);
+  const cleUrssafCourante = cleDeclaration(declarationUrssaf.moisIdx, declarationUrssaf.annee, "urssaf");
+  const cleTvaCourante = cleDeclaration(declarationUrssaf.moisIdx, declarationUrssaf.annee, "tva");
+  const urssafCouranteFaite = declarationsFaites.has(cleUrssafCourante);
+  const tvaCouranteFaite = declarationsFaites.has(cleTvaCourante);
 
   const prochaineEcheance = useMemo(() => {
     const echeanceActuelle = echeanceUrssaf();
@@ -889,11 +891,13 @@ export default function Home() {
     });
   }, [shineFactures, declarationUrssaf]);
 
-  const montantHTaDeclarer = useMemo(() => {
+  const montantTTCaDeclarer = useMemo(() => {
     if (!factureADeclarer) return null;
-    const montantTTC = shinePdfResults[factureADeclarer.id!]?.montant ?? factureADeclarer.montant;
-    return montantTTC ? montantTTC / (1 + TVA_RATE) : null;
+    return shinePdfResults[factureADeclarer.id!]?.montant ?? factureADeclarer.montant ?? null;
   }, [factureADeclarer, shinePdfResults]);
+
+  const montantHTaDeclarer = montantTTCaDeclarer !== null ? montantTTCaDeclarer / (1 + TVA_RATE) : null;
+  const montantTvaADeclarer = montantTTCaDeclarer !== null ? montantTTCaDeclarer * (TVA_RATE / (1 + TVA_RATE)) : null;
 
   return (
     <main className="min-h-screen bg-[#080810] text-white">
@@ -909,48 +913,83 @@ export default function Home() {
 
       <div className="px-6 py-5 flex flex-col gap-5 max-w-screen-2xl mx-auto">
 
-        {/* Bannière déclaration URSSAF */}
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 flex items-center gap-3">
-          <span className="text-lg shrink-0">ℹ️</span>
-          <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={declarationCouranteFaite}
-              onChange={() => toggleDeclarationFaite(cleDeclarationCourante)}
-              className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
-            />
-          </label>
-          <span className="text-sm text-emerald-200">
-            {declarationCouranteFaite ? (
-              <>
+        {/* Bannière déclarations URSSAF + TVA */}
+        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 flex flex-col gap-2">
+          {/* Ligne URSSAF */}
+          <div className="flex items-center gap-3">
+            <span className="text-lg shrink-0">ℹ️</span>
+            <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={urssafCouranteFaite}
+                onChange={() => toggleDeclarationFaite(cleUrssafCourante)}
+                className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+              />
+            </label>
+            <span className="text-sm text-emerald-200">
+              {urssafCouranteFaite ? (
+                <>
+                  <span className="line-through text-emerald-400/50">
+                    Saisir URSSAF : CA de {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
+                  </span>
+                  {" "}✅ — Prochaine échéance :{" "}
+                  <strong className="text-emerald-100">
+                    {MOIS_NOMS_LONG[moisADeclarerProchain.moisIdx]} {moisADeclarerProchain.annee}
+                  </strong>
+                  {" "}à saisir avant le{" "}
+                  <strong className="text-emerald-100">
+                    {prochaineEcheance.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+                  </strong>
+                </>
+              ) : (
+                <>
+                  Saisir URSSAF : CA de{" "}
+                  <strong className="text-emerald-100">
+                    {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
+                  </strong>
+                  {montantHTaDeclarer !== null && (
+                    <>
+                      {" "}— <strong className="text-emerald-100">{formatEur(montantHTaDeclarer)} HT</strong>
+                    </>
+                  )}
+                  {" "}(déclaration mois -2, avant le{" "}
+                  {echeanceUrssaf().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })})
+                </>
+              )}
+            </span>
+          </div>
+
+          {/* Ligne TVA */}
+          <div className="flex items-center gap-3">
+            <span className="text-lg shrink-0 opacity-0">ℹ️</span>
+            <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={tvaCouranteFaite}
+                onChange={() => toggleDeclarationFaite(cleTvaCourante)}
+                className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+              />
+            </label>
+            <span className="text-sm text-emerald-200">
+              {tvaCouranteFaite ? (
                 <span className="line-through text-emerald-400/50">
-                  Saisir URSSAF : CA de {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
+                  Saisir TVA : CA de {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
                 </span>
-                {" "}✅ — Prochaine échéance :{" "}
-                <strong className="text-emerald-100">
-                  {MOIS_NOMS_LONG[moisADeclarerProchain.moisIdx]} {moisADeclarerProchain.annee}
-                </strong>
-                {" "}à saisir avant le{" "}
-                <strong className="text-emerald-100">
-                  {prochaineEcheance.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
-                </strong>
-              </>
-            ) : (
-              <>
-                Saisir URSSAF : CA de{" "}
-                <strong className="text-emerald-100">
-                  {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
-                </strong>
-                {montantHTaDeclarer !== null && (
-                  <>
-                    {" "}— <strong className="text-emerald-100">{formatEur(montantHTaDeclarer)} HT</strong>
-                  </>
-                )}
-                {" "}(déclaration mois -2, avant le{" "}
-                {echeanceUrssaf().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })})
-              </>
-            )}
-          </span>
+              ) : (
+                <>
+                  Saisir TVA : CA de{" "}
+                  <strong className="text-emerald-100">
+                    {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
+                  </strong>
+                  {montantTvaADeclarer !== null && (
+                    <>
+                      {" "}— <strong className="text-emerald-100">{formatEur(montantTvaADeclarer)} de TVA collectée</strong>
+                    </>
+                  )}
+                </>
+              )}
+            </span>
+          </div>
         </div>
 
         {/* Ligne 1 : KPIs + saisie CA */}
