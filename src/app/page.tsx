@@ -540,6 +540,10 @@ function GmailSection({
       params.set("pattern", "facture@shine.fr");
 
       const res = await fetch(`/api/gmail?${params.toString()}`);
+      if (res.status === 401) {
+        signIn("google");
+        return;
+      }
       if (!res.ok) throw new Error("Erreur lors de la récupération");
       const data = await res.json();
       const loaded: Facture[] = data.factures || [];
@@ -552,9 +556,24 @@ function GmailSection({
     }
   }, [periode, dateDebut, dateFin, modeDate, onFacturesLoaded]);
 
+  // Refresh token Google révoqué/expiré : on relance la connexion Google
+  // automatiquement (une seule fois par onglet pour éviter une boucle).
   useEffect(() => {
-    if (session) fetchFactures();
-  }, [session, fetchFactures]);
+    if (session?.error === "RefreshAccessTokenError" && !sessionStorage.getItem("gmail-reauth")) {
+      sessionStorage.setItem("gmail-reauth", "1");
+      signIn("google");
+    } else if (session && !session.error) {
+      sessionStorage.removeItem("gmail-reauth");
+    }
+  }, [session]);
+
+  const accessToken = session?.accessToken;
+  useEffect(() => {
+    if (accessToken) fetchFactures();
+    // On ne recharge pas les factures à chaque refetch de session (toutes les
+    // 5 min), seulement quand on (re)devient connecté.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!accessToken, fetchFactures]);
 
   const totalShine = shineFactures
     .filter((f) => f.montant !== null)
@@ -569,7 +588,7 @@ function GmailSection({
     );
   }
 
-  if (!session) {
+  if (!session || session.error === "RefreshAccessTokenError") {
     return (
       <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-6 flex flex-col gap-4">
         <div className="flex items-center gap-3">
