@@ -1,1170 +1,169 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
-import { useSession, signIn, signOut } from "next-auth/react";
+import { useMemo, useState } from "react";
+import AFaire from "@/components/dashboard/AFaire";
+import AppHeader, { type Onglet, type Vue } from "@/components/dashboard/AppHeader";
+import Echeances from "@/components/dashboard/Echeances";
+import GraphiqueCA from "@/components/dashboard/GraphiqueCA";
+import Indicateurs from "@/components/dashboard/Indicateurs";
+import { NetCascade, Reserve } from "@/components/dashboard/Synthese";
+import TableFactures, { ConnexionGmail } from "@/components/dashboard/TableFactures";
 import SimulationIR from "@/components/SimulationIR";
-
-const TVA_RATE = 0.20;
-const URSSAF_RATE = 0.256;
-const CFP_RATE = 0.002;
-const TAUX_IR_FIXE = 0.24;
-
-const TAUX_IR_KEY = "shine-taux-ir-mode";
-
-function computeCalc(ca: number, tauxIR: number = TAUX_IR_FIXE) {
-  const tva = ca * (TVA_RATE / (1 + TVA_RATE));
-  const caHT = ca / (1 + TVA_RATE);
-  const urssaf = caHT * URSSAF_RATE;
-  const cfp = caHT * CFP_RATE;
-  const revenuImposable = caHT - urssaf - cfp;
-  const ir = revenuImposable * tauxIR;
-  const net = revenuImposable - ir;
-  const tauxIREffectif = revenuImposable > 0 ? ir / revenuImposable : 0;
-  return { tva, caHT, urssaf, cfp, revenuImposable, ir, net, tauxIREffectif };
-}
-
-function formatEur(val: number) {
-  return new Intl.NumberFormat("fr-FR", {
-    style: "currency",
-    currency: "EUR",
-    maximumFractionDigits: 0,
-  }).format(val);
-}
-
-function formatPct(val: number) {
-  return (val * 100).toFixed(1) + " %";
-}
-
-function StatCard({
-  label, value, sub, color, icon, valueColor,
-}: {
-  label: string; value: string; sub?: string; color: string; icon: string; valueColor?: string;
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-xl p-4 flex flex-col gap-1.5 border border-white/5 bg-white/[0.03]">
-      <div className={`absolute -top-4 -right-4 w-16 h-16 rounded-full opacity-20 blur-2xl ${color}`} />
-      <div className="flex items-center gap-1.5 text-white/40 text-xs font-medium">
-        <span className="text-sm">{icon}</span>
-        {label}
-      </div>
-      <div className={`text-xl font-bold tracking-tight ${valueColor ?? "text-white"}`}>{value}</div>
-      {sub && <div className="text-[10px] text-white/30">{sub}</div>}
-    </div>
-  );
-}
-
-interface Facture {
-  id: string;
-  sujet: string;
-  expediteur: string;
-  date: string;
-  montant: number | null;
-  snippet: string;
-  isShine: boolean;
-  attachments: { nom: string; attachmentId: string; messageId: string }[];
-  dateEncaissement?: string;
-}
-
-const PERIODES = [
-  { label: "7 derniers jours", value: "7d" },
-  { label: "30 derniers jours", value: "30d" },
-  { label: "90 derniers jours", value: "90d" },
-  { label: "Cette année", value: "365d" },
-];
-
-const MOIS_NOMS_LONG = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin", "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"];
-const MOIS_NOMS_COURT = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
-
-const MOIS_FR_IDX: Record<string, number> = {
-  janvier: 0, février: 1, fevrier: 1, mars: 2, avril: 3, mai: 4, juin: 5,
-  juillet: 6, août: 7, aout: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11, decembre: 11,
-};
-
-// Encaissement = mois facture + 2 mois (mars → mai, avril → juin, etc.)
-function moisEncaissement(moisFactureIdx: number, anneeFacture: number): { mois: number; annee: number } {
-  const d = new Date(anneeFacture, moisFactureIdx + 2, 1);
-  return { mois: d.getMonth(), annee: d.getFullYear() };
-}
-
-// Déclaration URSSAF BNC : le CA à déclarer ce mois-ci est celui du mois -2
-function moisADeclarerUrssaf(ref: Date = new Date()): { moisIdx: number; annee: number } {
-  const d = new Date(ref.getFullYear(), ref.getMonth() - 2, 1);
-  return { moisIdx: d.getMonth(), annee: d.getFullYear() };
-}
-
-function cleDeclaration(moisIdx: number, annee: number, type: "urssaf" | "tva" = "urssaf"): string {
-  return `${type}-${annee}-${String(moisIdx + 1).padStart(2, "0")}`;
-}
-
-// Échéance = dernier jour du mois de saisie (mois de déclaration courant).
-// Ne gère pas les rares décalages jours fériés/week-end du calendrier URSSAF officiel.
-function echeanceUrssaf(ref: Date = new Date()): Date {
-  return new Date(ref.getFullYear(), ref.getMonth() + 1, 0);
-}
-
-function extractMoisFacture(sujet: string): { moisIdx: number; annee: number } | null {
-  const m = sujet.match(/Facture\s+(\p{L}+)\s+(\d{4})/iu);
-  if (!m) return null;
-  const moisIdx = MOIS_FR_IDX[m[1].toLowerCase()];
-  if (moisIdx === undefined) return null;
-  return { moisIdx, annee: parseInt(m[2]) };
-}
-
-function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: Record<string, { montant: number | null }> }) {
-  const [hoverHisto, setHoverHisto] = useState<number | null>(null);
-  const [hoverCurve, setHoverCurve] = useState<number | null>(null);
-  const annee = new Date().getFullYear();
-
-  // CA encaissé par mois (selon date d'encaissement 45j fin de mois)
-  const moisData = useMemo(() => {
-    const mensuel = Array(12).fill(0);
-    for (const f of factures) {
-      const info = extractMoisFacture(f.sujet);
-      if (!info) continue;
-      const montant = pdfResults[f.id!]?.montant ?? f.montant;
-      if (!montant) continue;
-      const { mois, annee: anneeEnc } = moisEncaissement(info.moisIdx, info.annee);
-      if (anneeEnc === annee) mensuel[mois] += montant;
-    }
-    let cumul = 0;
-    return mensuel.map((ca, i) => {
-      cumul += ca;
-      return { i, nomCourt: MOIS_NOMS_COURT[i], nomLong: `${MOIS_NOMS_LONG[i]} ${annee}`, ca, cumul };
-    });
-  }, [factures, pdfResults, annee]);
-
-  const moisActuel = new Date().getMonth();
-
-  // Mois d'encaissement de la dernière facture (pour stopper la courbe)
-  const dernierMoisCourbe = useMemo(() => {
-    let max = -1;
-    for (const f of factures) {
-      const info = extractMoisFacture(f.sujet);
-      if (!info) continue;
-      const { mois, annee: anneeEnc } = moisEncaissement(info.moisIdx, info.annee);
-      if (anneeEnc === annee && mois > max) max = mois;
-    }
-    return max;
-  }, [factures, annee]);
-
-  // Map: mois d'encaissement (index) → nom long du mois de facturation associé
-  const factureParEncaissement = useMemo(() => {
-    const map: Record<number, string> = {};
-    for (const f of factures) {
-      const info = extractMoisFacture(f.sujet);
-      if (!info) continue;
-      const { mois, annee: anneeEnc } = moisEncaissement(info.moisIdx, info.annee);
-      if (anneeEnc === annee) {
-        map[mois] = `${MOIS_NOMS_LONG[info.moisIdx]} ${info.annee}`;
-      }
-    }
-    return map;
-  }, [factures, annee]);
-
-  const maxCA = Math.max(...moisData.map((p) => p.ca), 1);
-  const maxCumul = Math.max(...moisData.slice(0, dernierMoisCourbe + 1).map((p) => p.cumul), 1);
-  const totalEncaisse = dernierMoisCourbe >= 0 ? moisData[dernierMoisCourbe].cumul : 0;
-
-  const W = 560;
-  const H = 200;
-  const PAD = { top: 16, right: 16, bottom: 32, left: 64 };
-  const innerW = W - PAD.left - PAD.right;
-  const innerH = H - PAD.top - PAD.bottom;
-
-  // Les deux graphes utilisent les 12 mois fixes
-  const xScaleHisto = (i: number) => PAD.left + (i / 11) * innerW;
-
-  const xScaleCurve = (i: number) => PAD.left + (i / 11) * innerW;
-  const yScaleHisto = (v: number) => PAD.top + innerH - (v / maxCA) * innerH;
-  const yScaleCurve = (v: number) => PAD.top + innerH - (v / maxCumul) * innerH;
-
-  const cumulPoints = dernierMoisCourbe >= 0 ? moisData.slice(0, dernierMoisCourbe + 1) : [];
-  const pathCumul = cumulPoints
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScaleCurve(p.i)} ${yScaleCurve(p.cumul)}`)
-    .join(" ");
-  const areaCumul = cumulPoints.length > 0
-    ? pathCumul + ` L ${xScaleCurve(dernierMoisCourbe)} ${yScaleCurve(0)} L ${xScaleCurve(0)} ${yScaleCurve(0)} Z`
-    : "";
-
-  const AxeH = () => (
-    <>
-      {[0, 0.5, 1].map((t) => {
-        const y = yScaleHisto(maxCA * t);
-        return (
-          <g key={t}>
-            <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-            <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">{formatEur(maxCA * t)}</text>
-          </g>
-        );
-      })}
-    </>
-  );
-
-  const AxeC = () => (
-    <>
-      {[0, 0.25, 0.5, 0.75, 1].map((t) => {
-        const y = yScaleCurve(maxCumul * t);
-        return (
-          <g key={t}>
-            <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke="rgba(255,255,255,0.05)" strokeWidth={1} />
-            <text x={PAD.left - 6} y={y + 4} textAnchor="end" fontSize={9} fill="rgba(255,255,255,0.22)">{formatEur(maxCumul * t)}</text>
-          </g>
-        );
-      })}
-    </>
-  );
-
-  // Courbe CA mensuel — s'arrête au dernier mois d'encaissement
-  const mensuelPoints = dernierMoisCourbe >= 0 ? moisData.slice(0, dernierMoisCourbe + 1) : [];
-  const pathMensuel = mensuelPoints
-    .map((p, i) => `${i === 0 ? "M" : "L"} ${xScaleHisto(p.i)} ${yScaleHisto(p.ca)}`)
-    .join(" ");
-  const areaMensuel = mensuelPoints.length > 0
-    ? pathMensuel + ` L ${xScaleHisto(dernierMoisCourbe)} ${yScaleHisto(0)} L ${xScaleHisto(0)} ${yScaleHisto(0)} Z`
-    : "";
-
-  const ChartSvg = ({ children, onLeave }: { children: React.ReactNode; onLeave: () => void }) => (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={onLeave}>
-      {children}
-    </svg>
-  );
-
-  return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-      {/* Courbe CA mensuel encaissé */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">CA encaissé / mois</div>
-            <div className="text-lg font-bold text-indigo-300 mt-0.5">
-              {hoverHisto !== null && hoverHisto <= dernierMoisCourbe
-                ? formatEur(moisData[hoverHisto].ca)
-                : formatEur(totalEncaisse)}
-            </div>
-          </div>
-          <div className="text-right text-xs text-white/30 shrink-0">
-            {hoverHisto !== null && hoverHisto <= dernierMoisCourbe
-              ? <>
-                  <div className="text-white/60">{moisData[hoverHisto].nomLong}</div>
-                  {factureParEncaissement[hoverHisto] && (
-                    <div className="text-white/25">Facture {factureParEncaissement[hoverHisto]}</div>
-                  )}
-                </>
-              : <div className="text-white/25">{annee} · total encaissé</div>
-            }
-          </div>
-        </div>
-        <ChartSvg onLeave={() => setHoverHisto(null)}>
-          <defs>
-            <linearGradient id="mensuelGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#6366f1" stopOpacity="0.3" />
-              <stop offset="100%" stopColor="#6366f1" stopOpacity="0.01" />
-            </linearGradient>
-          </defs>
-          <AxeH />
-          {areaMensuel && <path d={areaMensuel} fill="url(#mensuelGrad)" />}
-          {pathMensuel && <path d={pathMensuel} fill="none" stroke="#818cf8" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
-          {mensuelPoints.map((p) => (
-            p.ca > 0 && (
-              <circle key={p.i} cx={xScaleHisto(p.i)} cy={yScaleHisto(p.ca)}
-                r={hoverHisto === p.i ? 6 : 4}
-                fill={hoverHisto === p.i ? "white" : "#818cf8"}
-                stroke={hoverHisto === p.i ? "#6366f1" : "rgba(99,102,241,0.3)"} strokeWidth={2}
-              />
-            )
-          ))}
-          {hoverHisto !== null && hoverHisto <= dernierMoisCourbe && moisData[hoverHisto].ca > 0 && (
-            <line x1={xScaleHisto(hoverHisto)} x2={xScaleHisto(hoverHisto)} y1={PAD.top} y2={PAD.top + innerH}
-              stroke="rgba(255,255,255,0.12)" strokeWidth={1} strokeDasharray="3 3" />
-          )}
-          {moisData.map((p) => (
-            <text key={p.i} x={xScaleHisto(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
-              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.2)") : "rgba(255,255,255,0.08)"}
-            >{p.nomCourt}</text>
-          ))}
-          {mensuelPoints.map((p) => (
-            <rect key={`hm-${p.i}`} x={xScaleHisto(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
-              fill="transparent" onMouseEnter={() => setHoverHisto(p.i)} />
-          ))}
-        </ChartSvg>
-        <div className="text-[10px] text-white/20">Règlement facture + 2 mois</div>
-      </div>
-
-      {/* Courbe CA cumulatif */}
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">CA cumulé {annee}</div>
-            <div className="text-lg font-bold text-emerald-400 mt-0.5">
-              {hoverCurve !== null && moisData[hoverCurve].cumul > 0
-                ? formatEur(moisData[hoverCurve].cumul)
-                : formatEur(totalEncaisse)}
-            </div>
-          </div>
-          <div className="text-right text-xs text-white/30 shrink-0">
-            {hoverCurve !== null && moisData[hoverCurve].cumul > 0
-              ? <>
-                  <div className="text-white/60">{moisData[hoverCurve].nomLong}</div>
-                  {factureParEncaissement[hoverCurve] && (
-                    <div className="text-white/25">Facture {factureParEncaissement[hoverCurve]}</div>
-                  )}
-                </>
-              : <div className="text-white/25">total encaissé à ce jour</div>
-            }
-          </div>
-        </div>
-        <ChartSvg onLeave={() => setHoverCurve(null)}>
-          <defs>
-            <linearGradient id="cumulGrad2" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.3" />
-              <stop offset="100%" stopColor="#10b981" stopOpacity="0.01" />
-            </linearGradient>
-          </defs>
-          <AxeC />
-          {areaCumul && <path d={areaCumul} fill="url(#cumulGrad2)" />}
-          {pathCumul && <path d={pathCumul} fill="none" stroke="#34d399" strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
-          {cumulPoints.map((p) => (
-            p.cumul > 0 && (
-              <circle key={p.i} cx={xScaleCurve(p.i)} cy={yScaleCurve(p.cumul)}
-                r={hoverCurve === p.i ? 6 : p.ca > 0 ? 4 : 2}
-                fill={hoverCurve === p.i ? "white" : "#34d399"}
-                stroke={hoverCurve === p.i ? "#10b981" : "rgba(16,185,129,0.3)"} strokeWidth={2}
-              />
-            )
-          ))}
-          {hoverCurve !== null && moisData[hoverCurve].cumul > 0 && (
-            <line x1={xScaleCurve(hoverCurve)} x2={xScaleCurve(hoverCurve)} y1={PAD.top} y2={PAD.top + innerH}
-              stroke="rgba(255,255,255,0.12)" strokeWidth={1} strokeDasharray="3 3" />
-          )}
-          {moisData.map((p) => (
-            <text key={p.i} x={xScaleCurve(p.i)} y={H - 6} textAnchor="middle" fontSize={9}
-              fill={p.i <= dernierMoisCourbe ? (p.ca > 0 ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.2)") : "rgba(255,255,255,0.08)"}
-            >{p.nomCourt}</text>
-          ))}
-          {cumulPoints.map((p) => (
-            <rect key={`hc-${p.i}`} x={xScaleCurve(p.i) - innerW / 22} y={PAD.top} width={innerW / 11} height={innerH}
-              fill="transparent" onMouseEnter={() => setHoverCurve(p.i)} />
-          ))}
-        </ChartSvg>
-      </div>
-    </div>
-  );
-}
-
-function IRProvisionSection({
-  factures, pdfResults, onTotalChange, tauxIR,
-}: {
-  factures: Facture[]; pdfResults: Record<string, { montant: number | null }>;
-  onTotalChange?: (total: number) => void;
-  tauxIR: number;
-}) {
-  const [checked, setChecked] = useState<Set<string>>(new Set());
-
-  const moisData = useMemo(() => {
-    const map = new Map<string, { moisIdx: number; annee: number; montant: number; ir: number }>();
-    for (const f of factures) {
-      if (!f.isShine) continue;
-      const info = extractMoisFacture(f.sujet);
-      if (!info) continue;
-      const montant = pdfResults[f.id!]?.montant ?? f.montant;
-      if (!montant) continue;
-      const cle = cleDeclaration(info.moisIdx, info.annee);
-      map.set(cle, { moisIdx: info.moisIdx, annee: info.annee, montant, ir: computeCalc(montant, tauxIR).ir });
-    }
-    return [...map.entries()]
-      .map(([cle, v]) => ({ cle, ...v }))
-      .sort((a, b) => (b.annee * 12 + b.moisIdx) - (a.annee * 12 + a.moisIdx));
-  }, [factures, pdfResults, tauxIR]);
-
-  const toggle = (cle: string) => {
-    setChecked((prev) => {
-      const next = new Set(prev);
-      if (next.has(cle)) next.delete(cle);
-      else next.add(cle);
-      return next;
-    });
-  };
-
-  const total = moisData.filter((m) => checked.has(m.cle)).reduce((s, m) => s + m.ir, 0);
-
-  useEffect(() => {
-    onTotalChange?.(total);
-  }, [total, onTotalChange]);
-
-  if (moisData.length === 0) return null;
-
-  return (
-    <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="font-semibold text-sm">Provision impôt sur le revenu</div>
-          <div className="text-xs text-white/40">Coche les mois à cumuler — montant à garder sur Shine pour l&apos;IR</div>
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <button
-            onClick={() => setChecked(new Set(moisData.map((m) => m.cle)))}
-            className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 hover:bg-white/10 transition-all"
-          >
-            Tout cocher
-          </button>
-          {checked.size > 0 && (
-            <button
-              onClick={() => setChecked(new Set())}
-              className="text-xs text-white/30 hover:text-white/60 transition-all"
-            >
-              ✕ Tout décocher
-            </button>
-          )}
-        </div>
-      </div>
-
-      {checked.size > 0 && (
-        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 flex items-center justify-between">
-          <span className="text-xs text-yellow-200">
-            {checked.size} mois sélectionné{checked.size > 1 ? "s" : ""}
-          </span>
-          <span className="text-2xl font-black text-yellow-400">{formatEur(total)}</span>
-        </div>
-      )}
-
-      <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1">
-        {moisData.map((m) => {
-          const isChecked = checked.has(m.cle);
-          return (
-            <label
-              key={m.cle}
-              className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border cursor-pointer transition-all ${
-                isChecked ? "bg-yellow-500/10 border-yellow-500/30" : "bg-white/[0.02] border-white/10 hover:bg-white/5"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={isChecked}
-                onChange={() => toggle(m.cle)}
-                className="w-4 h-4 rounded accent-yellow-500 cursor-pointer shrink-0"
-              />
-              <span className="flex-1 text-sm">{MOIS_NOMS_LONG[m.moisIdx]} {m.annee}</span>
-              <span className="text-xs text-white/30 shrink-0">CA {formatEur(m.montant)}</span>
-              <span className="text-sm font-bold text-yellow-400 shrink-0">{formatEur(m.ir)}</span>
-            </label>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function GmailSection({
-  onInjectCA,
-  onFacturesLoaded,
-  onPdfResults,
-}: {
-  onInjectCA: (montant: number) => void;
-  onFacturesLoaded: (factures: Facture[]) => void;
-  onPdfResults: (results: Record<string, { montant: number | null }>) => void;
-}) {
-  const { data: session, status } = useSession();
-  const [factures, setFactures] = useState<Facture[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [periode, setPeriode] = useState("365d");
-  const [dateDebut, setDateDebut] = useState("");
-  const [dateFin, setDateFin] = useState("");
-  const [modeDate, setModeDate] = useState<"preset" | "custom">("preset");
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [pdfLoading, setPdfLoading] = useState<string | null>(null);
-  const [pdfResults, setPdfResults] = useState<Record<string, { montant: number | null; tous: number[] }>>({});
-
-  const shineFactures = useMemo(() => factures.filter((f) => f.isShine), [factures]);
-
-  const getMontantFacture = (f: Facture): number | null => {
-    return pdfResults[f.id!]?.montant ?? f.montant ?? null;
-  };
-
-  const recalcCA = (selected: Set<string>, results: typeof pdfResults) => {
-    const total = shineFactures
-      .filter((f) => selected.has(f.id!))
-      .reduce((sum, f) => {
-        const m = results[f.id!]?.montant ?? f.montant ?? 0;
-        return sum + m;
-      }, 0);
-    if (total > 0) onInjectCA(total);
-  };
-
-  const toggleSelect = async (facture: Facture) => {
-    const newSelected = new Set(selectedIds);
-    if (newSelected.has(facture.id!)) {
-      newSelected.delete(facture.id!);
-    } else {
-      newSelected.add(facture.id!);
-      // Charger le PDF si pas encore fait
-      if (!pdfResults[facture.id!] && (facture.attachments?.length ?? 0) > 0) {
-        setPdfLoading(facture.id!);
-        try {
-          const att = facture.attachments[0];
-          const res = await fetch(`/api/gmail/attachment?messageId=${att.messageId}&attachmentId=${att.attachmentId}`);
-          const data = await res.json();
-          const newResults = { ...pdfResults, [facture.id!]: data };
-          setPdfResults(newResults);
-          onPdfResults(newResults);
-          setSelectedIds(newSelected);
-          recalcCA(newSelected, newResults);
-          return;
-        } catch {
-          // silence
-        } finally {
-          setPdfLoading(null);
-        }
-      }
-    }
-    setSelectedIds(newSelected);
-    recalcCA(newSelected, pdfResults);
-  };
-
-  const fetchFactures = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (modeDate === "custom" && dateDebut && dateFin) {
-        params.set("dateDebut", dateDebut);
-        params.set("dateFin", dateFin);
-      } else {
-        params.set("periode", periode);
-      }
-      // Toujours filtrer sur shine uniquement
-      params.set("pattern", "facture@shine.fr");
-
-      const res = await fetch(`/api/gmail?${params.toString()}`);
-      if (res.status === 401) {
-        signIn("google");
-        return;
-      }
-      if (!res.ok) throw new Error("Erreur lors de la récupération");
-      const data = await res.json();
-      const loaded: Facture[] = data.factures || [];
-      setFactures(loaded);
-      onFacturesLoaded(loaded);
-    } catch {
-      setError("Impossible de charger les factures.");
-    } finally {
-      setLoading(false);
-    }
-  }, [periode, dateDebut, dateFin, modeDate, onFacturesLoaded]);
-
-  // Refresh token Google révoqué/expiré : on relance la connexion Google
-  // automatiquement (une seule fois par onglet pour éviter une boucle).
-  useEffect(() => {
-    if (session?.error === "RefreshAccessTokenError" && !sessionStorage.getItem("gmail-reauth")) {
-      sessionStorage.setItem("gmail-reauth", "1");
-      signIn("google");
-    } else if (session && !session.error) {
-      sessionStorage.removeItem("gmail-reauth");
-    }
-  }, [session]);
-
-  const accessToken = session?.accessToken;
-  useEffect(() => {
-    if (accessToken) fetchFactures();
-    // On ne recharge pas les factures à chaque refetch de session (toutes les
-    // 5 min), seulement quand on (re)devient connecté.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!accessToken, fetchFactures]);
-
-  const totalShine = shineFactures
-    .filter((f) => f.montant !== null)
-    .reduce((sum, f) => sum + (f.montant || 0), 0);
-
-  if (status === "loading") {
-    return (
-      <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex items-center gap-3 text-white/40">
-        <span className="animate-spin text-xl">⏳</span>
-        <span className="text-sm">Chargement...</span>
-      </div>
-    );
-  }
-
-  if (!session || session.error === "RefreshAccessTokenError") {
-    return (
-      <div className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-6 flex flex-col gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-xl shrink-0">📧</div>
-          <div>
-            <div className="font-semibold text-sm">Import Gmail — Factures Shine</div>
-            <div className="text-xs text-white/40">Connecte ton compte Google pour lire tes factures</div>
-          </div>
-        </div>
-        <button
-          onClick={() => signIn("google")}
-          className="flex items-center justify-center gap-2 bg-white text-gray-900 font-semibold rounded-xl px-5 py-3 text-sm hover:bg-gray-100 transition-all"
-        >
-          <svg className="w-5 h-5" viewBox="0 0 24 24">
-            <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-            <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-            <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-            <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-          </svg>
-          Connecter Gmail
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-5 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-500/20 flex items-center justify-center text-base">📧</div>
-          <div>
-            <div className="font-semibold text-sm">Factures Shine</div>
-            <div className="text-xs text-white/40">facture@shine.fr • {session.user?.email}</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={fetchFactures}
-            disabled={loading}
-            className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 hover:bg-white/10 transition-all disabled:opacity-40"
-          >
-            {loading ? "⏳" : "🔄 Actualiser"}
-          </button>
-          <button
-            onClick={() => signOut()}
-            className="text-xs text-white/30 hover:text-white/60 transition-all"
-          >
-            Déconnecter
-          </button>
-        </div>
-      </div>
-
-      {/* Filtres période */}
-      <div className="flex flex-col gap-3 border border-white/5 rounded-xl p-3 bg-white/[0.02]">
-        <div className="flex gap-2">
-          <button
-            onClick={() => setModeDate("preset")}
-            className={`text-xs rounded-lg px-3 py-1.5 transition-all ${modeDate === "preset" ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
-          >
-            Période prédéfinie
-          </button>
-          <button
-            onClick={() => setModeDate("custom")}
-            className={`text-xs rounded-lg px-3 py-1.5 transition-all ${modeDate === "custom" ? "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
-          >
-            Dates personnalisées
-          </button>
-        </div>
-
-        {modeDate === "preset" && (
-          <div className="flex flex-wrap gap-2">
-            {PERIODES.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => setPeriode(p.value)}
-                className={`text-xs rounded-lg px-3 py-1.5 transition-all ${periode === p.value ? "bg-white/15 text-white border border-white/20" : "bg-white/5 text-white/40 border border-white/10 hover:bg-white/10"}`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {modeDate === "custom" && (
-          <div className="flex gap-2 items-center flex-wrap">
-            <input
-              type="date"
-              value={dateDebut}
-              onChange={(e) => setDateDebut(e.target.value)}
-              className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white outline-none focus:border-indigo-500/60 transition-all"
-            />
-            <span className="text-white/30 text-xs">→</span>
-            <input
-              type="date"
-              value={dateFin}
-              onChange={(e) => setDateFin(e.target.value)}
-              className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white outline-none focus:border-indigo-500/60 transition-all"
-            />
-          </div>
-        )}
-      </div>
-
-      {error && (
-        <div className="text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2">{error}</div>
-      )}
-
-      {!loading && shineFactures.length > 0 && (
-        <>
-          <div className="flex items-center justify-between text-sm border-b border-white/5 pb-3">
-            <span className="text-white/50">{shineFactures.length} facture{shineFactures.length > 1 ? "s" : ""} Shine</span>
-            {totalShine > 0 && (
-              <span className="font-bold text-white/50">{formatEur(totalShine)} total</span>
-            )}
-          </div>
-
-          {/* Bandeau sélection multiple */}
-          <div className="flex items-center justify-between gap-2">
-            <button
-              onClick={() => {
-                const allIds = new Set(shineFactures.map((f) => f.id!));
-                setSelectedIds(allIds);
-                recalcCA(allIds, pdfResults);
-              }}
-              className="text-xs bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 hover:bg-white/10 transition-all"
-            >
-              Tout sélectionner
-            </button>
-            {selectedIds.size > 0 && (
-              <button
-                onClick={() => { setSelectedIds(new Set()); onInjectCA(0); }}
-                className="text-xs text-white/30 hover:text-white/60 transition-all"
-              >
-                ✕ Tout désélectionner
-              </button>
-            )}
-          </div>
-          {selectedIds.size > 0 && (
-            <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
-              <span className="text-xs text-emerald-300">
-                {selectedIds.size} facture{selectedIds.size > 1 ? "s" : ""} sélectionnée{selectedIds.size > 1 ? "s" : ""} —
-                estimation sur <span className="font-bold">{formatEur(shineFactures.filter((f) => selectedIds.has(f.id!)).reduce((s, f) => s + (getMontantFacture(f) ?? 0), 0))}</span>
-              </span>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-2 max-h-96 overflow-y-auto pr-1">
-            {shineFactures.map((f) => {
-              const isSelected = selectedIds.has(f.id!);
-              const isLoadingPdf = pdfLoading === f.id;
-              const montantAffiche = getMontantFacture(f);
-
-              return (
-                <div
-                  key={f.id}
-                  onClick={() => toggleSelect(f)}
-                  className={`flex items-start gap-3 rounded-xl px-3 py-2.5 border cursor-pointer transition-all ${
-                    isSelected
-                      ? "bg-emerald-500/10 border-emerald-500/30"
-                      : "bg-indigo-500/5 border-indigo-500/20 hover:bg-indigo-500/10"
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 mt-0.5 transition-all ${isSelected ? "bg-emerald-500 border-emerald-500" : "border-white/20"}`}>
-                    {isLoadingPdf ? (
-                      <span className="text-xs animate-spin">⏳</span>
-                    ) : isSelected ? (
-                      <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : null}
-                  </div>
-
-                  <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-                    <div className="text-sm font-medium truncate">{f.sujet || "(Sans sujet)"}</div>
-                    <div className="text-xs text-white/20">
-                      Émise le {new Date(f.date).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
-                    </div>
-                    {f.dateEncaissement && (
-                      <div className="text-xs text-amber-400/70">
-                        Encaissement prévu : {new Date(f.dateEncaissement).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
-                      </div>
-                    )}
-                    {(f.attachments?.length ?? 0) > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {f.attachments.map((a) => (
-                          <span key={a.attachmentId} className="text-xs bg-white/5 border border-white/10 rounded px-2 py-0.5 text-white/40 flex items-center gap-1">
-                            📎 {a.nom}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {montantAffiche !== null && (
-                    <div className={`text-sm font-bold shrink-0 ${isSelected ? "text-emerald-400" : "text-indigo-300"}`}>
-                      {formatEur(montantAffiche)}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {(() => {
-              const declaration = moisADeclarerUrssaf();
-              const factureADeclarer = shineFactures.find((f) => {
-                if (!selectedIds.has(f.id!)) return false;
-                const info = extractMoisFacture(f.sujet);
-                return info && info.moisIdx === declaration.moisIdx && info.annee === declaration.annee;
-              });
-              if (!factureADeclarer) return null;
-              const montantTTC = getMontantFacture(factureADeclarer);
-              if (montantTTC === null) return null;
-              const montantHT = montantTTC / (1 + TVA_RATE);
-              return (
-                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 flex flex-col gap-1 mt-1">
-                  <div className="text-[10px] text-emerald-300 font-semibold uppercase tracking-widest">
-                    CA à renseigner dans la déclaration URSSAF BNC — {MOIS_NOMS_LONG[declaration.moisIdx]} {declaration.annee}
-                  </div>
-                  <div className="text-2xl font-black text-emerald-400">{formatEur(montantHT)}</div>
-                  <div className="text-xs text-white/40">
-                    Montant HT (CA TTC {formatEur(montantTTC)} — seul le HT doit être saisi sur l&apos;URSSAF)
-                  </div>
-                </div>
-              );
-            })()}
-          </div>
-        </>
-      )}
-
-      {!loading && shineFactures.length === 0 && !error && (
-        <div className="text-sm text-white/30 text-center py-4">
-          Aucune facture Shine trouvée sur cette période
-        </div>
-      )}
-
-      {loading && (
-        <div className="text-sm text-white/40 text-center py-4 flex items-center justify-center gap-2">
-          <span className="animate-spin">⏳</span> Lecture des factures Shine...
-        </div>
-      )}
-    </div>
-  );
-}
-
-const URSSAF_DECLARATIONS_KEY = "shine-urssaf-declarations-faites";
+import { agreger } from "@/lib/agregats";
+import { TAUX_IR_FIXE, analyserFactures, computeCalc, idxMois } from "@/lib/finance";
+import { REGLAGES_IR_DEFAUT, REGLAGES_IR_KEY, type ReglagesIR, simulerDepuisDashboard } from "@/lib/reglagesIR";
+import { useFacturesShine } from "@/lib/useFacturesShine";
+import { useStoredSet, useStoredValue } from "@/lib/useStored";
+
+// Clé historique : les cases déjà cochées restent valables (clés par mois de facture)
+const DECLARATIONS_KEY = "shine-urssaf-declarations-faites";
+// CA d'avril 2026 déjà déclaré sur l'URSSAF avant la mise en place de ce suivi
+const DECLARATIONS_DEFAUT = ["urssaf-2026-04"];
 
 export default function Home() {
-  const [ca, setCa] = useState<number>(154000);
-  const [input, setInput] = useState("154000");
-  const [modeFacture, setModeFacture] = useState(false);
-  const [shineFactures, setShineFactures] = useState<Facture[]>([]);
-  const [shinePdfResults, setShinePdfResults] = useState<Record<string, { montant: number | null }>>({});
-  const [declarationsFaites, setDeclarationsFaites] = useState<Set<string>>(new Set());
+  const anneeCourante = new Date().getFullYear();
+  const [onglet, setOnglet] = useState<Onglet>("apercu");
+  const [annee, setAnnee] = useState(anneeCourante);
+  const [vue, setVue] = useStoredValue<Vue>("shine-vue", "encaisse");
+  const [periode, setPeriode] = useStoredValue("shine-periode-gmail", "548d");
+  const [caProjection, setCaProjection] = useStoredValue("shine-ca-projection", 154000);
+  const [modeTaux, setModeTaux] = useStoredValue<"fixe" | "simule">("shine-mode-taux-ir", "simule");
+  const [reglagesStockes, setReglages] = useStoredValue<ReglagesIR>(REGLAGES_IR_KEY, REGLAGES_IR_DEFAUT);
+  const [faits, basculer] = useStoredSet(DECLARATIONS_KEY, DECLARATIONS_DEFAUT);
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(URSSAF_DECLARATIONS_KEY);
-      if (raw) {
-        setDeclarationsFaites(new Set(JSON.parse(raw)));
-      } else {
-        // CA d'avril 2026 déjà déclaré sur l'URSSAF avant la mise en place de ce suivi
-        const defaut = new Set([cleDeclaration(3, 2026, "urssaf")]);
-        setDeclarationsFaites(defaut);
-        localStorage.setItem(URSSAF_DECLARATIONS_KEY, JSON.stringify([...defaut]));
-      }
-    } catch {
-      // silence
-    }
-  }, []);
+  const g = useFacturesShine(periode);
+  const reglages = useMemo(() => ({ ...REGLAGES_IR_DEFAUT, ...reglagesStockes }), [reglagesStockes]);
 
-  const toggleDeclarationFaite = (cle: string) => {
-    setDeclarationsFaites((prev) => {
-      const next = new Set(prev);
-      if (next.has(cle)) next.delete(cle);
-      else next.add(cle);
-      try {
-        localStorage.setItem(URSSAF_DECLARATIONS_KEY, JSON.stringify([...next]));
-      } catch {
-        // silence
-      }
-      return next;
-    });
-  };
+  // Simulation IR sur le CA annuel prévu → taux appliqué partout dans le dashboard
+  const calcProjectionBrut = useMemo(() => computeCalc(caProjection), [caProjection]);
+  const sim = useMemo(
+    () => simulerDepuisDashboard(reglages, calcProjectionBrut.caHT, calcProjectionBrut.baseIR),
+    [reglages, calcProjectionBrut],
+  );
+  const tauxSimuleActif = modeTaux === "simule" && sim.tauxEquivalent !== null;
+  const tauxIR = tauxSimuleActif ? (sim.tauxEquivalent as number) : TAUX_IR_FIXE;
 
-  const handleInjectCA = (montant: number) => {
-    setInput(String(montant));
-    setCa(montant);
-    setModeFacture(true);
-  };
+  const infos = useMemo(() => analyserFactures(g.factures, g.montantsPdf, faits), [g.factures, g.montantsPdf, faits]);
+  const ag = useMemo(() => agreger(infos, annee, tauxIR), [infos, annee, tauxIR]);
+  const calc = useMemo(
+    () => computeCalc(vue === "encaisse" ? ag.caADate : caProjection, tauxIR),
+    [vue, ag.caADate, caProjection, tauxIR],
+  );
 
-  const handleResetCA = () => {
-    setModeFacture(false);
-    setCa(154000);
-    setInput("154000");
-  };
+  // Estimation du CA annuel : encaissé + attendu + mois restants sans facture × moyenne
+  const estimation = useMemo(() => {
+    if (annee !== anneeCourante || ag.caADate + ag.caPrevu <= 0) return null;
+    const moisVides = ag.mensuel.filter((v, i) => i > ag.maintenant.mois && v === 0 && ag.prevu[i] === 0).length;
+    return ag.caADate + ag.caPrevu + moisVides * ag.moyenne;
+  }, [ag, annee, anneeCourante]);
 
-  const [modeTauxIR, setModeTauxIR] = useState<"fixe" | "simule">("fixe");
-  const [tauxIRSimule, setTauxIRSimule] = useState<number | null>(null);
+  const annees = useMemo(() => {
+    const s = new Set<number>([anneeCourante]);
+    for (const f of infos) s.add(f.encaissement.annee);
+    return [...s].sort((a, b) => b - a);
+  }, [infos, anneeCourante]);
 
-  useEffect(() => {
-    try {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (localStorage.getItem(TAUX_IR_KEY) === "simule") setModeTauxIR("simule");
-    } catch {
-      // silence
-    }
-  }, []);
-
-  const changerModeTauxIR = useCallback((mode: "fixe" | "simule") => {
-    setModeTauxIR(mode);
-    try {
-      localStorage.setItem(TAUX_IR_KEY, mode);
-    } catch {
-      // silence
-    }
-  }, []);
-
-  const tauxIR = modeTauxIR === "simule" && tauxIRSimule !== null ? tauxIRSimule : TAUX_IR_FIXE;
-  const libelleTauxIR = modeTauxIR === "simule" && tauxIRSimule !== null ? `Taux simulé ${formatPct(tauxIR)}` : `Taux fixe ${formatPct(TAUX_IR_FIXE)}`;
-
-  const calc = useMemo(() => computeCalc(ca, tauxIR), [ca, tauxIR]);
-
-  const handleInput = (val: string) => {
-    setInput(val);
-    const num = parseFloat(val.replace(",", "."));
-    if (!isNaN(num) && num >= 0) setCa(num);
-  };
-
-  const netPct = ca > 0 ? (calc.net / ca) * 100 : 0;
-  const declarationUrssaf = useMemo(() => moisADeclarerUrssaf(), []);
-  const cleUrssafCourante = cleDeclaration(declarationUrssaf.moisIdx, declarationUrssaf.annee, "urssaf");
-  const cleTvaCourante = cleDeclaration(declarationUrssaf.moisIdx, declarationUrssaf.annee, "tva");
-  const urssafCouranteFaite = declarationsFaites.has(cleUrssafCourante);
-  const tvaCouranteFaite = declarationsFaites.has(cleTvaCourante);
-
-  const prochaineEcheance = useMemo(() => {
-    const echeanceActuelle = echeanceUrssaf();
-    const d = new Date(echeanceActuelle.getFullYear(), echeanceActuelle.getMonth() + 1, 1);
-    return echeanceUrssaf(d);
-  }, []);
-  const moisADeclarerProchain = useMemo(() => {
-    const d = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1);
-    return moisADeclarerUrssaf(d);
-  }, []);
-
-  const factureADeclarer = useMemo(() => {
-    return shineFactures.find((f) => {
-      const info = extractMoisFacture(f.sujet);
-      return info && info.moisIdx === declarationUrssaf.moisIdx && info.annee === declarationUrssaf.annee;
-    });
-  }, [shineFactures, declarationUrssaf]);
-
-  const montantTTCaDeclarer = useMemo(() => {
-    if (!factureADeclarer) return null;
-    return shinePdfResults[factureADeclarer.id!]?.montant ?? factureADeclarer.montant ?? null;
-  }, [factureADeclarer, shinePdfResults]);
-
-  const montantHTaDeclarer = montantTTCaDeclarer !== null ? montantTTCaDeclarer / (1 + TVA_RATE) : null;
-  const montantTvaADeclarer = montantTTCaDeclarer !== null ? montantTTCaDeclarer * (TVA_RATE / (1 + TVA_RATE)) : null;
-
-  const [totalProvisionIR, setTotalProvisionIR] = useState(0);
+  const toutesAnnee = useMemo(() => infos.filter((f) => f.encaissement.annee === annee), [infos, annee]);
+  const nom = g.session?.user?.name ?? "";
+  const initiales = nom ? nom.split(/\s+/).map((m) => m[0]).slice(0, 2).join("").toUpperCase() : null;
+  const afficherConnexion = !g.connecte && g.status !== "loading";
 
   return (
-    <main className="min-h-screen bg-[#080810] text-white">
-      {/* Top bar */}
-      <div className="border-b border-white/5 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-indigo-500/25 flex items-center justify-center text-base">💎</div>
-          <span className="font-bold text-sm tracking-tight">Shine Dashboard</span>
-          <span className="text-white/20 text-xs">BNC • TVA 20%</span>
-        </div>
-        <div className="text-[10px] text-white/20">Taux 2026 • Non contractuel</div>
-      </div>
+    <main className="min-h-screen bg-ink text-sm text-txt">
+      <AppHeader
+        onglet={onglet}
+        onOnglet={setOnglet}
+        vue={vue}
+        onVue={setVue}
+        annee={annee}
+        annees={annees}
+        onAnnee={setAnnee}
+        initiales={initiales}
+      />
 
-      <div className="px-6 py-5 flex flex-col gap-5 max-w-screen-2xl mx-auto">
-
-        {/* Bannière déclarations URSSAF + TVA */}
-        <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 flex flex-col gap-2">
-          {/* Ligne URSSAF */}
-          <div className="flex items-center gap-3">
-            <span className="text-lg shrink-0">ℹ️</span>
-            <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={urssafCouranteFaite}
-                onChange={() => toggleDeclarationFaite(cleUrssafCourante)}
-                className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+      <div className="mx-auto box-border flex max-w-[1280px] flex-col gap-6 px-5 pb-12 pt-7 sm:px-8">
+        {onglet === "apercu" && (
+          <>
+            {afficherConnexion && <ConnexionGmail />}
+            <AFaire ag={ag} tauxIR={tauxIR} faits={faits} basculer={basculer} onVoirEcheances={() => setOnglet("echeances")} />
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <NetCascade
+                calc={calc}
+                vue={vue}
+                tauxIR={tauxIR}
+                libelleTaux={tauxSimuleActif ? "Taux IR simulé" : "Taux IR fixe"}
+                caProjection={caProjection}
+                onCaProjection={setCaProjection}
+                estimation={estimation}
+                annee={annee}
               />
-            </label>
-            <span className="text-sm text-emerald-200">
-              {urssafCouranteFaite ? (
-                <>
-                  <span className="line-through text-emerald-400/50">
-                    Saisir URSSAF : CA de {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
-                  </span>
-                  {" "}✅ — Prochaine échéance :{" "}
-                  <strong className="text-emerald-100">
-                    {MOIS_NOMS_LONG[moisADeclarerProchain.moisIdx]} {moisADeclarerProchain.annee}
-                  </strong>
-                  {" "}à saisir avant le{" "}
-                  <strong className="text-emerald-100">
-                    {prochaineEcheance.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
-                  </strong>
-                </>
-              ) : (
-                <>
-                  Saisir URSSAF : CA de{" "}
-                  <strong className="text-emerald-100">
-                    {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
-                  </strong>
-                  {montantHTaDeclarer !== null && (
-                    <>
-                      {" "}— <strong className="text-emerald-100">{formatEur(montantHTaDeclarer)} HT</strong>
-                    </>
-                  )}
-                  {" "}(déclaration mois -2, avant le{" "}
-                  {echeanceUrssaf().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })})
-                </>
-              )}
-            </span>
-          </div>
-
-          {/* Ligne TVA */}
-          <div className="flex items-center gap-3">
-            <span className="text-lg shrink-0 opacity-0">ℹ️</span>
-            <label className="flex items-center gap-2 shrink-0 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={tvaCouranteFaite}
-                onChange={() => toggleDeclarationFaite(cleTvaCourante)}
-                className="w-4 h-4 rounded accent-emerald-500 cursor-pointer"
+              <Reserve ag={ag} tauxIR={tauxIR} annee={annee} />
+            </div>
+            <Indicateurs
+              ag={ag}
+              annee={annee}
+              calc={calc}
+              tauxIR={tauxIR}
+              tauxSimuleActif={tauxSimuleActif}
+              onOuvrirImpots={() => setOnglet("impots")}
+            />
+            <GraphiqueCA ag={ag} annee={annee} />
+            {g.connecte && (
+              <TableFactures
+                infos={infos}
+                limite={5}
+                loading={g.loading}
+                error={g.error}
+                pdfEnCours={g.pdfEnCours}
+                onRafraichir={g.rafraichir}
+                basculer={basculer}
+                onVoirTout={() => setOnglet("factures")}
               />
-            </label>
-            <span className="text-sm text-emerald-200">
-              {tvaCouranteFaite ? (
-                <span className="line-through text-emerald-400/50">
-                  Saisir TVA : CA de {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
-                </span>
-              ) : (
-                <>
-                  Saisir TVA : CA de{" "}
-                  <strong className="text-emerald-100">
-                    {MOIS_NOMS_LONG[declarationUrssaf.moisIdx]} {declarationUrssaf.annee}
-                  </strong>
-                  {montantTvaADeclarer !== null && (
-                    <>
-                      {" "}— <strong className="text-emerald-100">{formatEur(montantTvaADeclarer)} de TVA collectée</strong>
-                    </>
-                  )}
-                </>
-              )}
-            </span>
-          </div>
+            )}
+          </>
+        )}
 
-          {/* Ligne total provision IR */}
-          {totalProvisionIR > 0 && (
-            <div className="flex items-center gap-3">
-              <span className="text-lg shrink-0 opacity-0">ℹ️</span>
-              <span className="w-4 h-4 shrink-0" />
-              <span className="text-sm text-emerald-200">
-                Provision impôt sur le revenu (mois cochés) :{" "}
-                <strong className="text-emerald-100">{formatEur(totalProvisionIR)}</strong>
-              </span>
-            </div>
-          )}
-        </div>
+        {onglet === "factures" && (
+          afficherConnexion ? <ConnexionGmail /> : (
+            <TableFactures
+              infos={infos}
+              loading={g.loading}
+              error={g.error}
+              email={g.session?.user?.email}
+              pdfEnCours={g.pdfEnCours}
+              periode={periode}
+              onPeriode={setPeriode}
+              onRafraichir={g.rafraichir}
+              basculer={basculer}
+            />
+          )
+        )}
 
-        {/* Ligne 1 : KPIs + saisie CA */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-start">
+        {onglet === "impots" && (
+          <SimulationIR
+            r={reglages}
+            setR={(fn) => setReglages((prev) => fn({ ...REGLAGES_IR_DEFAUT, ...prev }))}
+            sim={sim}
+            caTTC={caProjection}
+            caHT={calcProjectionBrut.caHT}
+            baseDashboard={calcProjectionBrut.baseIR}
+            annee={annee}
+            modeTaux={modeTaux}
+            onModeTaux={setModeTaux}
+            encaisseesAnnee={ag.encaisseesAnnee}
+            toutesAnnee={toutesAnnee}
+            faits={faits}
+            basculer={basculer}
+          />
+        )}
 
-          {/* KPIs en ligne */}
-          <div className="flex flex-col gap-3">
-            {/* Net en hero */}
-            <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-transparent p-5 flex items-center justify-between">
-              <div>
-                <div className="text-[10px] font-semibold text-emerald-400/60 uppercase tracking-widest mb-1">Net disponible</div>
-                <div className="text-4xl font-black text-emerald-400 tracking-tight">{formatEur(calc.net)}</div>
-                <div className="text-xs text-white/30 mt-1">{netPct.toFixed(0)}% de ton CA TTC</div>
-              </div>
-              <div className="flex flex-col gap-1 text-right">
-                <div className="text-[10px] text-white/20 uppercase tracking-wider">CA encaissé</div>
-                <div className="text-xl font-bold text-white">{formatEur(ca)}</div>
-                <div className="text-xs text-white/30">HT : {formatEur(calc.caHT)}</div>
-              </div>
-            </div>
+        {onglet === "echeances" && (
+          <Echeances infos={infos.filter((f) => idxMois(f.declaration) >= idxMois({ mois: 0, annee: annee - 1 }))} faits={faits} basculer={basculer} annee={annee} />
+        )}
 
-            {/* 4 charges en grille */}
-            <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
-              <StatCard label="TVA DGFiP" value={`- ${formatEur(calc.tva)}`} sub="20% du CA TTC" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
-              <StatCard label="URSSAF BNC" value={`- ${formatEur(calc.urssaf)}`} sub="25.6% du CA HT" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
-              <StatCard label="Impôt revenu" value={`- ${formatEur(calc.ir)}`} sub={libelleTauxIR} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
-              <StatCard label="Formation CFP" value={`- ${formatEur(calc.cfp)}`} sub="0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
-            </div>
-
-            {/* Barre de répartition */}
-            <div className="rounded-xl border border-white/5 bg-white/[0.02] px-4 py-3 flex flex-col gap-2">
-              <div className="flex h-2 rounded-full overflow-hidden gap-px">
-                <div className="bg-red-500/80 transition-all duration-500" style={{ width: ca > 0 ? `${(calc.tva / ca) * 100}%` : "0%" }} title="TVA" />
-                <div className="bg-orange-500/80 transition-all duration-500" style={{ width: ca > 0 ? `${(calc.urssaf / ca) * 100}%` : "0%" }} title="URSSAF" />
-                <div className="bg-yellow-500/80 transition-all duration-500" style={{ width: ca > 0 ? `${(calc.ir / ca) * 100}%` : "0%" }} title="IR" />
-                <div className="bg-emerald-500/80 transition-all duration-500 flex-1 min-w-0" title="Net" />
-              </div>
-              <div className="flex gap-4 text-[10px] text-white/30">
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-red-500/80 inline-block" />TVA {ca > 0 ? `${((calc.tva / ca) * 100).toFixed(0)}%` : ""}</span>
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-orange-500/80 inline-block" />URSSAF {ca > 0 ? `${((calc.urssaf / ca) * 100).toFixed(0)}%` : ""}</span>
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-yellow-500/80 inline-block" />IR {ca > 0 ? `${((calc.ir / ca) * 100).toFixed(0)}%` : ""}</span>
-                <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-500/80 inline-block" />Net {ca > 0 ? `${((calc.net / ca) * 100).toFixed(0)}%` : ""}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Panneau saisie + récap + tranches */}
-          <div className="w-full lg:w-72 xl:w-80 shrink-0 flex flex-col gap-3">
-            {/* Saisie CA */}
-            <div className="rounded-2xl border border-white/5 bg-white/[0.03] p-4 flex flex-col gap-3">
-              <label className="text-[10px] font-semibold text-white/30 uppercase tracking-widest">CA estimé (TTC)</label>
-              <div className="relative">
-                <input
-                  type="number"
-                  value={input}
-                  onChange={(e) => handleInput(e.target.value)}
-                  className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 pr-8 text-xl font-bold outline-none focus:border-indigo-500/60 focus:ring-2 focus:ring-indigo-500/20 transition-all"
-                  min={0} step={100}
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/20 font-bold">€</span>
-              </div>
-              <input type="range" min={0} max={200000} step={100} value={ca}
-                onChange={(e) => { setCa(Number(e.target.value)); setInput(String(e.target.value)); }}
-              />
-              <div className="flex justify-between text-[10px] text-white/20 -mt-1"><span>0 €</span><span>200 k€</span></div>
-              {modeFacture && (
-                <div className="flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
-                  <span className="text-[10px] text-emerald-300">📎 Montant issu d&apos;une facture</span>
-                  <button onClick={handleResetCA} className="text-[10px] text-white/30 hover:text-white/60">✕</button>
-                </div>
-              )}
-            </div>
-
-            {/* Récap compact */}
-            <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 flex flex-col gap-1.5 text-xs">
-              <div className="text-[10px] font-semibold text-white/30 uppercase tracking-widest mb-1">Récapitulatif</div>
-              {[
-                { label: "CA TTC", val: formatEur(ca), c: "text-white" },
-                { label: "CA HT", val: formatEur(calc.caHT), c: "text-white/60" },
-                { label: "– TVA", val: `- ${formatEur(calc.tva)}`, c: "text-red-400" },
-                { label: "– URSSAF", val: `- ${formatEur(calc.urssaf)}`, c: "text-red-400" },
-                { label: "– CFP", val: `- ${formatEur(calc.cfp)}`, c: "text-red-400" },
-                { label: `– IR (${formatPct(tauxIR)})`, val: `- ${formatEur(calc.ir)}`, c: "text-red-400" },
-              ].map(({ label, val, c }) => (
-                <div key={label} className="flex justify-between items-center">
-                  <span className="text-white/40">{label}</span>
-                  <span className={`font-semibold ${c}`}>{val}</span>
-                </div>
-              ))}
-              <div className="border-t border-white/8 mt-1 pt-2 flex justify-between items-center">
-                <span className="font-bold text-emerald-300 text-xs">= Net</span>
-                <span className="text-base font-black text-emerald-400">{formatEur(calc.net)}</span>
-              </div>
-            </div>
-
-          </div>
-        </div>
-
-        {/* Ligne 2 : Graphes */}
-        <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
-
-        {/* Ligne 2bis : Provision impôt sur le revenu */}
-        <IRProvisionSection factures={shineFactures} pdfResults={shinePdfResults} onTotalChange={setTotalProvisionIR} tauxIR={tauxIR} />
-
-        {/* Ligne 2ter : Simulation impôt sur le revenu */}
-        <SimulationIR
-          caHT={calc.caHT}
-          baseImposableDashboard={calc.caHT - calc.urssaf - calc.cfp}
-          modeTaux={modeTauxIR}
-          tauxFixe={TAUX_IR_FIXE}
-          onModeTauxChange={changerModeTauxIR}
-          onTauxSimuleChange={setTauxIRSimule}
-        />
-
-        {/* Ligne 3 : Factures Gmail */}
-        <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
-
+        <p className="m-0 text-[11px] text-faint">
+          Taux 2026 : URSSAF micro-BNC 25,6 %, CFP 0,2 %, TVA 20 %, barème IR LF 2026 · Non contractuel
+        </p>
       </div>
     </main>
   );
