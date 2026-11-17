@@ -92,6 +92,18 @@ export default function InteretsComposes() {
   const graduationsX = res.points.filter((p) => p.annee % pas === 0 || p.annee === n).map((p) => p.annee);
 
   const s = survol !== null ? res.points[survol] : null;
+
+  // Intérêts gagnés chaque année et montant net si on les retire
+  const lignesAnnuelles = res.points.slice(1).map((p, i) => {
+    const prec = res.points[i];
+    const gainAnnee = p.interets - prec.interets;
+    const avant5ans = p.annee < 5;
+    const taux = avant5ans ? PFU : PS_PEA;
+    // Quote-part de gain contenue dans le retrait
+    const partGain = p.valeur > 0 ? Math.max(0, p.interets) / p.valeur : 0;
+    const net = gainAnnee > 0 ? gainAnnee * (1 - partGain * taux) : gainAnnee;
+    return { ...p, gainAnnee, net, avant5ans };
+  });
   const nom = r.etf.trim() || "ton ETF";
 
   return (
@@ -313,30 +325,44 @@ export default function InteretsComposes() {
           </div>
 
           <Card className="p-6">
-            <details>
+            <details open>
               <summary className="cursor-pointer font-display text-[15px] font-semibold">Détail année par année</summary>
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full min-w-[520px] border-collapse text-[13px]">
+                <table className="w-full min-w-[760px] border-collapse text-[13px]">
                   <thead>
                     <tr className="text-left text-[11px] uppercase tracking-[0.04em] text-faint">
                       <th scope="col" className="border-b border-line px-3 py-2.5 font-semibold">Année</th>
                       <th scope="col" className="border-b border-line px-3 py-2.5 text-right font-semibold">Versé cumulé</th>
                       <th scope="col" className="border-b border-line px-3 py-2.5 text-right font-semibold">Intérêts cumulés</th>
                       <th scope="col" className="border-b border-line px-3 py-2.5 text-right font-semibold">Valeur</th>
+                      <th scope="col" className="border-b border-line px-3 py-2.5 text-right font-semibold">Intérêts de l&apos;année</th>
+                      <th scope="col" className="border-b border-line px-3 py-2.5 text-right font-semibold text-net">Net retirable</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {res.points.slice(1).map((p) => (
-                      <tr key={p.annee} className="hover:bg-white/[0.02]">
-                        <td className="border-b border-[#1b1f28] p-3 text-muted">{anneeDepart + p.annee} <span className="text-faint">· an {p.annee}</span></td>
-                        <td className="border-b border-[#1b1f28] p-3 text-right">{formatEur(p.verse)}</td>
-                        <td className="border-b border-[#1b1f28] p-3 text-right text-net">{formatEur(p.interets)}</td>
-                        <td className="border-b border-[#1b1f28] p-3 text-right font-semibold">{formatEur(p.valeur)}</td>
+                    {lignesAnnuelles.map((l) => (
+                      <tr key={l.annee} className="hover:bg-white/[0.02]">
+                        <td className="border-b border-[#1b1f28] p-3 text-muted">{anneeDepart + l.annee} <span className="text-faint">· an {l.annee}</span></td>
+                        <td className="border-b border-[#1b1f28] p-3 text-right">{formatEur(l.verse)}</td>
+                        <td className="border-b border-[#1b1f28] p-3 text-right text-muted">{formatEur(l.interets)}</td>
+                        <td className="border-b border-[#1b1f28] p-3 text-right font-semibold">{formatEur(l.valeur)}</td>
+                        <td className="border-b border-[#1b1f28] p-3 text-right">{formatEur(l.gainAnnee)}</td>
+                        <td className="border-b border-[#1b1f28] p-3 text-right">
+                          <div className={`font-semibold ${l.avant5ans ? "text-faint" : "text-net"}`}>{formatEur(l.net)}</div>
+                          <div className="text-[11px] text-faint">
+                            {l.avant5ans ? "PFU 31,4 % + clôture" : `≈ ${formatEur(l.net / 12)} / mois`}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              <p className="m-0 mt-3 text-xs text-faint">
+                Net retirable : ce que tu toucherais en retirant uniquement les intérêts gagnés dans l&apos;année. Sur un retrait, seule la part de gain
+                (gains totaux ÷ valeur du plan) est taxée : {formatPct(PS_PEA)} de prélèvements sociaux à partir de 5 ans, {formatPct(PFU)} avant
+                (et le PEA est clôturé). Chaque ligne est indépendante : retirer chaque année réduirait les intérêts des années suivantes.
+              </p>
             </details>
           </Card>
 
