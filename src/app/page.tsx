@@ -2,27 +2,22 @@
 
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { useSession, signIn, signOut } from "next-auth/react";
+import SimulationIR from "@/components/SimulationIR";
 
 const TVA_RATE = 0.20;
 const URSSAF_RATE = 0.256;
 const CFP_RATE = 0.002;
 const TAUX_IR_FIXE = 0.24;
 
-const IR_TRANCHES = [
-  { max: 11497, rate: 0 },
-  { max: 29315, rate: 0.11 },
-  { max: 83823, rate: 0.30 },
-  { max: 180294, rate: 0.41 },
-  { max: Infinity, rate: 0.45 },
-];
+const TAUX_IR_KEY = "shine-taux-ir-mode";
 
-function computeCalc(ca: number) {
+function computeCalc(ca: number, tauxIR: number = TAUX_IR_FIXE) {
   const tva = ca * (TVA_RATE / (1 + TVA_RATE));
   const caHT = ca / (1 + TVA_RATE);
   const urssaf = caHT * URSSAF_RATE;
   const cfp = caHT * CFP_RATE;
   const revenuImposable = caHT - urssaf - cfp;
-  const ir = revenuImposable * TAUX_IR_FIXE;
+  const ir = revenuImposable * tauxIR;
   const net = revenuImposable - ir;
   const tauxIREffectif = revenuImposable > 0 ? ir / revenuImposable : 0;
   return { tva, caHT, urssaf, cfp, revenuImposable, ir, net, tauxIREffectif };
@@ -357,10 +352,11 @@ function CAGraphes({ factures, pdfResults }: { factures: Facture[]; pdfResults: 
 }
 
 function IRProvisionSection({
-  factures, pdfResults, onTotalChange,
+  factures, pdfResults, onTotalChange, tauxIR,
 }: {
   factures: Facture[]; pdfResults: Record<string, { montant: number | null }>;
   onTotalChange?: (total: number) => void;
+  tauxIR: number;
 }) {
   const [checked, setChecked] = useState<Set<string>>(new Set());
 
@@ -373,12 +369,12 @@ function IRProvisionSection({
       const montant = pdfResults[f.id!]?.montant ?? f.montant;
       if (!montant) continue;
       const cle = cleDeclaration(info.moisIdx, info.annee);
-      map.set(cle, { moisIdx: info.moisIdx, annee: info.annee, montant, ir: computeCalc(montant).ir });
+      map.set(cle, { moisIdx: info.moisIdx, annee: info.annee, montant, ir: computeCalc(montant, tauxIR).ir });
     }
     return [...map.entries()]
       .map(([cle, v]) => ({ cle, ...v }))
       .sort((a, b) => (b.annee * 12 + b.moisIdx) - (a.annee * 12 + a.moisIdx));
-  }, [factures, pdfResults]);
+  }, [factures, pdfResults, tauxIR]);
 
   const toggle = (cle: string) => {
     setChecked((prev) => {
@@ -883,7 +879,31 @@ export default function Home() {
     setInput("154000");
   };
 
-  const calc = useMemo(() => computeCalc(ca), [ca]);
+  const [modeTauxIR, setModeTauxIR] = useState<"fixe" | "simule">("fixe");
+  const [tauxIRSimule, setTauxIRSimule] = useState<number | null>(null);
+
+  useEffect(() => {
+    try {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (localStorage.getItem(TAUX_IR_KEY) === "simule") setModeTauxIR("simule");
+    } catch {
+      // silence
+    }
+  }, []);
+
+  const changerModeTauxIR = useCallback((mode: "fixe" | "simule") => {
+    setModeTauxIR(mode);
+    try {
+      localStorage.setItem(TAUX_IR_KEY, mode);
+    } catch {
+      // silence
+    }
+  }, []);
+
+  const tauxIR = modeTauxIR === "simule" && tauxIRSimule !== null ? tauxIRSimule : TAUX_IR_FIXE;
+  const libelleTauxIR = modeTauxIR === "simule" && tauxIRSimule !== null ? `Taux simulé ${formatPct(tauxIR)}` : `Taux fixe ${formatPct(TAUX_IR_FIXE)}`;
+
+  const calc = useMemo(() => computeCalc(ca, tauxIR), [ca, tauxIR]);
 
   const handleInput = (val: string) => {
     setInput(val);
@@ -934,7 +954,7 @@ export default function Home() {
           <span className="font-bold text-sm tracking-tight">Shine Dashboard</span>
           <span className="text-white/20 text-xs">BNC • TVA 20%</span>
         </div>
-        <div className="text-[10px] text-white/20">Taux 2025 • Non contractuel</div>
+        <div className="text-[10px] text-white/20">Taux 2026 • Non contractuel</div>
       </div>
 
       <div className="px-6 py-5 flex flex-col gap-5 max-w-screen-2xl mx-auto">
@@ -1053,7 +1073,7 @@ export default function Home() {
             <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
               <StatCard label="TVA DGFiP" value={`- ${formatEur(calc.tva)}`} sub="20% du CA TTC" color="bg-red-500" icon="🏛️" valueColor="text-red-400" />
               <StatCard label="URSSAF BNC" value={`- ${formatEur(calc.urssaf)}`} sub="25.6% du CA HT" color="bg-orange-500" icon="🏥" valueColor="text-red-400" />
-              <StatCard label="Impôt revenu" value={`- ${formatEur(calc.ir)}`} sub={`Taux fixe 24%`} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
+              <StatCard label="Impôt revenu" value={`- ${formatEur(calc.ir)}`} sub={libelleTauxIR} color="bg-yellow-500" icon="📊" valueColor="text-red-400" />
               <StatCard label="Formation CFP" value={`- ${formatEur(calc.cfp)}`} sub="0.2% du CA HT" color="bg-purple-500" icon="🎓" valueColor="text-red-400" />
             </div>
 
@@ -1110,7 +1130,7 @@ export default function Home() {
                 { label: "– TVA", val: `- ${formatEur(calc.tva)}`, c: "text-red-400" },
                 { label: "– URSSAF", val: `- ${formatEur(calc.urssaf)}`, c: "text-red-400" },
                 { label: "– CFP", val: `- ${formatEur(calc.cfp)}`, c: "text-red-400" },
-                { label: "– IR (24%)", val: `- ${formatEur(calc.ir)}`, c: "text-red-400" },
+                { label: `– IR (${formatPct(tauxIR)})`, val: `- ${formatEur(calc.ir)}`, c: "text-red-400" },
               ].map(({ label, val, c }) => (
                 <div key={label} className="flex justify-between items-center">
                   <span className="text-white/40">{label}</span>
@@ -1130,7 +1150,17 @@ export default function Home() {
         <CAGraphes factures={shineFactures} pdfResults={shinePdfResults} />
 
         {/* Ligne 2bis : Provision impôt sur le revenu */}
-        <IRProvisionSection factures={shineFactures} pdfResults={shinePdfResults} onTotalChange={setTotalProvisionIR} />
+        <IRProvisionSection factures={shineFactures} pdfResults={shinePdfResults} onTotalChange={setTotalProvisionIR} tauxIR={tauxIR} />
+
+        {/* Ligne 2ter : Simulation impôt sur le revenu */}
+        <SimulationIR
+          caHT={calc.caHT}
+          baseImposableDashboard={calc.caHT - calc.urssaf - calc.cfp}
+          modeTaux={modeTauxIR}
+          tauxFixe={TAUX_IR_FIXE}
+          onModeTauxChange={changerModeTauxIR}
+          onTauxSimuleChange={setTauxIRSimule}
+        />
 
         {/* Ligne 3 : Factures Gmail */}
         <GmailSection onInjectCA={handleInjectCA} onFacturesLoaded={setShineFactures} onPdfResults={setShinePdfResults} />
