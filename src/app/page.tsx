@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import AFaire from "@/components/dashboard/AFaire";
+import Comparatif from "@/components/dashboard/Comparatif";
 import AppHeader, { type Onglet, type Vue } from "@/components/dashboard/AppHeader";
 import Echeances from "@/components/dashboard/Echeances";
 import GraphiqueCA from "@/components/dashboard/GraphiqueCA";
@@ -163,6 +164,8 @@ export default function Home() {
         )}
 
         {onglet === "interets" && <InteretsComposes />}
+
+        {onglet === "comparatif" && <Comparatif caHTDashboard={calcProjectionBrut.caHT} foyer={reglages} />}
 
         <p className="m-0 text-[11px] text-faint">
           Taux 2026 : URSSAF micro-BNC 25,6 %, CFP 0,2 %, TVA 20 %, barème IR LF 2026 · Non contractuel
