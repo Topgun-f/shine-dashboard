@@ -2,7 +2,7 @@
 
 import { IconeLogo, Segmented } from "@/components/ui";
 
-export type Onglet = "apercu" | "factures" | "impots" | "echeances" | "interets";
+export type Onglet = "apercu" | "factures" | "impots" | "echeances" | "interets" | "comparatif";
 export type Vue = "encaisse" | "projection";
 
 const ONGLETS: { value: Onglet; label: string }[] = [
@@ -11,6 +11,7 @@ const ONGLETS: { value: Onglet; label: string }[] = [
   { value: "impots", label: "Impôts" },
   { value: "echeances", label: "Échéances" },
   { value: "interets", label: "Intérêts composés" },
+  { value: "comparatif", label: "Comparatif statuts" },
 ];
 
 export default function AppHeader({
