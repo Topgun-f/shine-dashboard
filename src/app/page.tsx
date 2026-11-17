@@ -6,6 +6,7 @@ import AppHeader, { type Onglet, type Vue } from "@/components/dashboard/AppHead
 import Echeances from "@/components/dashboard/Echeances";
 import GraphiqueCA from "@/components/dashboard/GraphiqueCA";
 import Indicateurs from "@/components/dashboard/Indicateurs";
+import InteretsComposes from "@/components/dashboard/InteretsComposes";
 import { NetCascade, Reserve } from "@/components/dashboard/Synthese";
 import TableFactures, { ConnexionGmail } from "@/components/dashboard/TableFactures";
 import SimulationIR from "@/components/SimulationIR";
@@ -160,6 +161,8 @@ export default function Home() {
         {onglet === "echeances" && (
           <Echeances infos={infos.filter((f) => idxMois(f.declaration) >= idxMois({ mois: 0, annee: annee - 1 }))} faits={faits} basculer={basculer} annee={annee} />
         )}
+
+        {onglet === "interets" && <InteretsComposes />}
 
         <p className="m-0 text-[11px] text-faint">
           Taux 2026 : URSSAF micro-BNC 25,6 %, CFP 0,2 %, TVA 20 %, barème IR LF 2026 · Non contractuel
